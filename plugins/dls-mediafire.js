@@ -1,4 +1,5 @@
 import fetch from 'node-fetch'
+import * as cheerio from 'cheerio'
 import {
   generateWAMessageFromContent,
   proto
@@ -30,51 +31,117 @@ const getIcon = mime => {
   return '📄'
 }
 
-const getRealSize = async (url) => {
-  try {
-    const res = await fetch(url, { method: 'HEAD', timeout: 15000, redirect: 'follow' })
-    const cl = res.headers.get('content-length')
-    const ct = res.headers.get('content-type')
-    console.log(`[MF DEBUG] HEAD → status: ${res.status} | url final: ${res.url} | content-length: ${cl} | content-type: ${ct}`)
-    return cl ? parseInt(cl) : null
-  } catch (e) {
-    console.log(`[MF DEBUG] HEAD falló: ${e.message}`)
-    return null
+const scrapeMediafireFile = async (pageUrl) => {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
   }
+
+  const res = await fetch(pageUrl, { headers, redirect: 'follow', timeout: 30000 })
+  const html = await res.text()
+  const $ = cheerio.load(html)
+
+  let directLink = null
+
+
+  const btn = $('a#downloadButton, a.input.btn.btn-skyblue[href*="download"], a[id*="download"][href*="mediafire"]')
+  if (btn.length) {
+    directLink = btn.first().attr('href')
+  }
+
+
+  if (!directLink) {
+    $('script').each((_, el) => {
+      const src = $(el).html() || ''
+      const match = src.match(/https:\/\/download\d+\.mediafire\.com\/[^"'\s]+/)
+      if (match) directLink = match[0]
+    })
+  }
+
+  if (!directLink) {
+    const match = html.match(/https:\/\/download\d+\.mediafire\.com\/[^"'\s<>]+/)
+    if (match) directLink = match[0]
+  }
+
+  if (!directLink) throw new Error('No se encontró link de descarga (posible captcha o archivo eliminado)')
+
+
+  directLink = directLink.replace(/&amp;/g, '&').trim()
+
+
+  const filename = $('div.filename, .dl-btn-label, #filename').first().text().trim()
+    || directLink.split('/').pop().replace(/\+/g, ' ') || 'archivo'
+
+  const sizeText = $('ul.details li:nth-child(2) span, .dl-btn-data, .details li span').first().text().trim()
+  const mime = getMimeFromFilename(filename)
+
+  console.log(`[MF DEBUG] Scraped → link: ${directLink}`)
+  console.log(`[MF DEBUG] Scraped → filename: ${filename} | size: ${sizeText}`)
+
+  return { link: directLink, filename, sizeText, mime }
 }
 
-const downloadAndSend = async (conn, m, fileLink, filename, mime, size) => {
-  // ── DEBUG 1: info inicial ──
-  console.log(`[MF DEBUG] ─────────────────────────────`)
-  console.log(`[MF DEBUG] Archivo  : ${filename}`)
-  console.log(`[MF DEBUG] MIME     : ${mime}`)
-  console.log(`[MF DEBUG] Tamaño API: ${formatSize(size)} (${size} bytes)`)
-  console.log(`[MF DEBUG] Link     : ${fileLink}`)
+const getMimeFromFilename = (filename) => {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  const map = {
+    apk: 'application/vnd.android.package-archive',
+    zip: 'application/zip',
+    rar: 'application/x-rar-compressed',
+    '7z': 'application/x-7z-compressed',
+    mp4: 'video/mp4',
+    mkv: 'video/x-matroska',
+    mp3: 'audio/mpeg',
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    exe: 'application/x-msdownload',
+    iso: 'application/x-iso9660-image',
+  }
+  return map[ext] || 'application/octet-stream'
+}
 
+const parseSize = (sizeText) => {
+  if (!sizeText) return 0
+  const match = sizeText.match(/([\d.]+)\s*(GB|MB|KB|B)/i)
+  if (!match) return 0
+  const n = parseFloat(match[1])
+  const unit = match[2].toUpperCase()
+  if (unit === 'GB') return n * 1e9
+  if (unit === 'MB') return n * 1e6
+  if (unit === 'KB') return n * 1e3
+  return n
+}
+
+const downloadAndSend = async (conn, m, pageUrl, filenameHint, mimeHint, sizeHint) => {
   await conn.sendMessage(m.chat, {
-    text: `🔍 *DEBUG 1 — Info de la API*\n\n📄 Archivo: ${filename}\n📦 Tamaño API: ${formatSize(size)}\n🔗 Link: ${fileLink}`
+    text: `🩸 DENJI BOT 🩸\n\n🔍 Obteniendo link directo...`
   }, { quoted: m })
 
-  // ── DEBUG 2: HEAD para verificar tamaño real ──
-  const realSize = await getRealSize(fileLink)
-  console.log(`[MF DEBUG] HEAD real size: ${realSize !== null ? formatSize(realSize) : 'null'}`)
+  const scraped = await scrapeMediafireFile(pageUrl)
+  const filename = scraped.filename || filenameHint || 'archivo'
+  const mime = scraped.mime || mimeHint || 'application/octet-stream'
+  const sizeBytes = parseSize(scraped.sizeText) || parseInt(sizeHint) || 0
+
+  console.log(`[MF DEBUG] Size calculado: ${formatSize(sizeBytes)}`)
 
   await conn.sendMessage(m.chat, {
-    text: `🔍 *DEBUG 2 — HEAD al link*\n\n📦 Tamaño real (HEAD): ${realSize !== null ? formatSize(realSize) : 'null (sin content-length)'}`
+    text: `🔍 *Link directo obtenido*\n\n📄 ${filename}\n📦 ${scraped.sizeText || formatSize(sizeBytes)}`
   }, { quoted: m })
 
-  const finalSize = realSize ?? parseInt(size) ?? 0
-
-  if (finalSize >= MAX_SIZE) {
+  if (sizeBytes >= MAX_SIZE) {
     await m.react('❌')
     return conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n❌ Archivo demasiado grande\n\n💀 Tamaño: ${formatSize(finalSize)}\n💀 Límite: 2 GB\n\n> Descárgalo manualmente desde Mediafire`
+      text: `🩸 DENJI BOT 🩸\n\n❌ Archivo demasiado grande\n\n💀 Tamaño: ${scraped.sizeText || formatSize(sizeBytes)}\n💀 Límite: 2 GB\n\n> Descárgalo manualmente desde Mediafire`
     }, { quoted: m })
   }
 
-  if (finalSize >= WARN_SIZE) {
+  if (sizeBytes >= WARN_SIZE) {
     await conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n⚠️ Archivo grande (${formatSize(finalSize)}), esto puede tardar varios minutos...`
+      text: `🩸 DENJI BOT 🩸\n\n⚠️ Archivo grande (${scraped.sizeText}), esto puede tardar varios minutos...`
     }, { quoted: m })
   }
 
@@ -82,76 +149,31 @@ const downloadAndSend = async (conn, m, fileLink, filename, mime, size) => {
     text: `🩸 DENJI BOT 🩸\n\n⚰️ Descargando ${filename}...`
   }, { quoted: m })
 
-  // ── Descarga real ──
-  console.log(`[MF DEBUG] Iniciando GET al link...`)
-  const fileRes = await fetch(fileLink, {
-    timeout: 300000,
-    redirect: 'follow'
-  })
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Referer': 'https://www.mediafire.com/',
+  }
 
-  // ── DEBUG 3: respuesta del GET ──
-  const finalUrl = fileRes.url
-  const statusGet = fileRes.status
+  const fileRes = await fetch(scraped.link, { headers, redirect: 'follow', timeout: 300000 })
+
   const ctGet = fileRes.headers.get('content-type')
   const clGet = fileRes.headers.get('content-length')
+  console.log(`[MF DEBUG] GET final → status: ${fileRes.status} | ct: ${ctGet} | cl: ${clGet}`)
 
-  console.log(`[MF DEBUG] GET → status: ${statusGet} | url final: ${finalUrl}`)
-  console.log(`[MF DEBUG] GET → content-type: ${ctGet} | content-length: ${clGet}`)
-
-  await conn.sendMessage(m.chat, {
-    text: `🔍 *DEBUG 3 — GET respuesta*\n\n🌐 Status: ${statusGet}\n📄 Content-Type: ${ctGet}\n📦 Content-Length: ${clGet ? formatSize(clGet) : 'null'}\n🔗 URL final: ${finalUrl}`
-  }, { quoted: m })
-
-  if (!fileRes.ok) throw new Error(`HTTP ${statusGet} al descargar`)
-
-  // Si el content-type es HTML, Mediafire devolvió una página de error
-  if (ctGet && ctGet.includes('text/html')) {
-    const html = await fileRes.text()
-    console.log(`[MF DEBUG] Respuesta HTML (primeros 500 chars): ${html.substring(0, 500)}`)
-    await conn.sendMessage(m.chat, {
-      text: `🔍 *DEBUG 4 — HTML recibido (error)*\n\n${html.substring(0, 300)}`
-    }, { quoted: m })
-    throw new Error('Mediafire devolvió HTML en vez del archivo (link expirado o bloqueado)')
-  }
+  if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status} al descargar`)
+  if (ctGet?.includes('text/html')) throw new Error('Mediafire bloqueó la descarga (HTML recibido)')
 
   const buffer = Buffer.from(await fileRes.arrayBuffer())
+  console.log(`[MF DEBUG] Buffer: ${formatSize(buffer.length)}`)
 
-  // ── DEBUG 4: buffer resultado ──
-  console.log(`[MF DEBUG] Buffer descargado: ${formatSize(buffer.length)} (${buffer.length} bytes)`)
-  console.log(`[MF DEBUG] Primeros bytes (hex): ${buffer.slice(0, 16).toString('hex')}`)
-
-  await conn.sendMessage(m.chat, {
-    text: `🔍 *DEBUG 4 — Buffer descargado*\n\n📦 Tamaño buffer: ${formatSize(buffer.length)}\n🔢 Primeros bytes (hex): ${buffer.slice(0, 16).toString('hex')}`
-  }, { quoted: m })
-
-  if (buffer.length < 1024) {
-    const preview = buffer.toString('utf8').substring(0, 200)
-    console.log(`[MF DEBUG] Buffer muy pequeño, contenido: ${preview}`)
-    await conn.sendMessage(m.chat, {
-      text: `🔍 *DEBUG 5 — Buffer sospechoso*\n\nContenido: ${preview}`
-    }, { quoted: m })
-    throw new Error(`Archivo descargado muy pequeño (${buffer.length} bytes)`)
-  }
-
-  if (finalSize > 0 && buffer.length < finalSize * 0.95) {
-    console.log(`[MF DEBUG] Buffer incompleto: esperado ${finalSize}, obtenido ${buffer.length}`)
-    await conn.sendMessage(m.chat, {
-      text: `🔍 *DEBUG 5 — Descarga incompleta*\n\nEsperado: ${formatSize(finalSize)}\nObtenido: ${formatSize(buffer.length)}`
-    }, { quoted: m })
-    throw new Error(`Descarga incompleta: esperado ${formatSize(finalSize)}, obtenido ${formatSize(buffer.length)}`)
-  }
-
-  console.log(`[MF DEBUG] ✅ Buffer OK, enviando a WhatsApp...`)
+  if (buffer.length < 1024) throw new Error(`Archivo muy pequeño (${buffer.length} bytes)`)
 
   await conn.sendMessage(m.chat, {
     document: buffer,
     fileName: filename,
     mimetype: mime,
-    caption: `🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 Archivo: ${filename}\n💀 Tamaño real: ${formatSize(buffer.length)}\n💀 Tipo: ${mime}`
+    caption: `🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 Archivo: ${filename}\n💀 Tamaño: ${formatSize(buffer.length)}\n💀 Tipo: ${mime}`
   }, { quoted: m })
-
-  console.log(`[MF DEBUG] ✅ Enviado correctamente`)
-  console.log(`[MF DEBUG] ─────────────────────────────`)
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
@@ -169,35 +191,33 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 
   await m.react('🩸')
 
-  // ── CARPETA ──
   if (isFolderUrl(text)) {
     try {
       const apiUrl = `https://api.delirius.store/download/mediafire?url=${encodeURIComponent(text)}`
-      console.log(`[MF DEBUG] Consultando API carpeta: ${apiUrl}`)
       const res = await fetch(apiUrl, { timeout: 30000 })
       const json = await res.json()
-      console.log(`[MF DEBUG] Respuesta API carpeta:`, JSON.stringify(json).substring(0, 500))
 
       if (!json.status || !json.data?.length) throw new Error('No se pudo obtener la carpeta')
 
       const archivos = json.data.slice(0, 10)
       const rows = archivos.map((file, i) => {
-        const size = parseInt(file.size) || 0
+        const size = parseSize(file.size)
         const tooLarge = size >= MAX_SIZE
         const icon = tooLarge ? '❌' : getIcon(file.mime)
-        const sizeLabel = formatSize(file.size) + (tooLarge ? ' (muy grande)' : '')
+
+        const pageUrl = `https://www.mediafire.com/file/${file.key || ''}/file`
 
         return {
-          header: icon + ' ' + (file.mime || 'archivo').split('/')[1]?.toUpperCase(),
+          header: icon + ' ' + (file.extension || 'archivo').toUpperCase(),
           title: (file.filename || 'Sin nombre').substring(0, 35),
-          description: `💀 ${sizeLabel} | 📅 ${file.uploaded?.split(' ')[0] || '?'}`,
-          id: 'mfdl_' + i + '_' + Buffer.from(file.link).toString('base64') + '_' + Buffer.from(file.filename || 'file').toString('base64') + '_' + (file.mime || 'application/octet-stream') + '_' + (file.size || '0')
+          description: `💀 ${file.size || '?'} | 📅 ${file.uploaded?.split(' ')[0] || '?'}`,
+          id: 'mfdl_' + i + '_' + Buffer.from(file.link || pageUrl).toString('base64') + '_' + Buffer.from(file.filename || 'file').toString('base64') + '_' + (file.mime || 'application/octet-stream') + '_' + (file.size || '0')
         }
       })
 
       const interactiveMessage = proto.Message.InteractiveMessage.create({
         header: { title: 'DENJI BOT - MEDIAFIRE', subtitle: 'Selecciona un archivo', hasMediaAttachment: false },
-        body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Carpeta encontrada\n💀 ${json.data.length} archivos\n\n❌ = mayor a 2GB (no descargable)\n\n> Elige uno para descargar` },
+        body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Carpeta encontrada\n💀 ${json.data.length} archivos\n\n❌ = mayor a 2GB\n\n> Elige uno para descargar` },
         footer: { text: '🩸 DENJI BOT 🩸' },
         nativeFlowMessage: {
           buttons: [{
@@ -224,21 +244,12 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     return
   }
 
-  // ── ARCHIVO INDIVIDUAL ──
+
   if (isFileUrl(text)) {
     try {
-      const apiUrl = `https://api.delirius.store/download/mediafire?url=${encodeURIComponent(text)}`
-      console.log(`[MF DEBUG] Consultando API archivo: ${apiUrl}`)
-      const res = await fetch(apiUrl, { timeout: 30000 })
-      const json = await res.json()
-      console.log(`[MF DEBUG] Respuesta API archivo:`, JSON.stringify(json))
 
-      if (!json.status || !json.data) throw new Error('No se pudo obtener el archivo')
-
-      const file = Array.isArray(json.data) ? json.data[0] : json.data
-      if (!file?.link) throw new Error('Sin link de descarga')
-
-      await downloadAndSend(conn, m, file.link, file.filename || 'archivo', file.mime || 'application/octet-stream', file.size)
+      const pageUrl = text.includes('/file/') ? text : `https://www.mediafire.com/file/${text}/file`
+      await downloadAndSend(conn, m, pageUrl, null, null, 0)
       await m.react('🩸')
 
     } catch (e) {
