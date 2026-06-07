@@ -1,13 +1,13 @@
 import fetch from 'node-fetch'
 
-let handler = async (m, { conn, text }) => {
+let handler = async (m, { conn, text, usedPrefix, command }) => {
   if (!text) {
     return conn.sendMessage(m.chat, {
-      text: '📥 「 HINATA APK 」 📥\n\n💫 » Busca APKs\n\n> #apk <nombre>\n> #apk Minecraft\n> #apk WhatsApp Plus'
+      text: `🩸 DENJI BOT 🩸\n\n🔪 Busca y descarga APKs\n\n> ${usedPrefix}${command} <nombre>\n> Ejemplo: ${usedPrefix}${command} Minecraft`
     }, { quoted: m })
   }
 
-  await m.react('🔍')
+  await m.react('🩸')
 
   try {
     let apiUrl = `https://api.delirius.store/download/apk?query=${encodeURIComponent(text)}`
@@ -15,21 +15,21 @@ let handler = async (m, { conn, text }) => {
     let json = await res.json()
 
     if (!json.status || !json.data) {
-      await m.react('❌')
+      await m.react('💀')
       return conn.sendMessage(m.chat, {
-        text: '📥 「 HINATA APK 」 📥\n\n💫 » No se encontró: ' + text
+        text: '🩸 DENJI BOT 🩸\n\n💀 No se encontró: ' + text
       }, { quoted: m })
     }
 
     let { name, size, image, download, developer, stats, publish } = json.data
 
-    let texto = '📥 「 HINATA APK 」 📥\n\n'
-    texto += '📱 » *' + name + '*\n'
-    texto += '👤 » Developer: ' + (developer || 'N/A') + '\n'
-    texto += '📦 » Tamaño: ' + size + '\n'
-    texto += '📅 » Publicado: ' + (publish || 'N/A') + '\n'
-    texto += '⬇️ » Descargas: ' + (stats?.downloads?.toLocaleString() || 'N/A') + '\n'
-    texto += '⭐ » Rating: ' + (stats?.rating?.average || 'N/A') + '\n\n'
+    let texto = '🩸 DENJI BOT 🩸\n\n'
+    texto += '🔪 *' + name + '*\n'
+    texto += '💀 Developer: ' + (developer || 'N/A') + '\n'
+    texto += '💀 Tamaño: ' + size + '\n'
+    texto += '💀 Publicado: ' + (publish || 'N/A') + '\n'
+    texto += '💀 Descargas: ' + (stats?.downloads?.toLocaleString() || 'N/A') + '\n'
+    texto += '💀 Rating: ' + (stats?.rating?.average || 'N/A') + '\n\n'
     texto += '> Enviando archivo...'
 
     await conn.sendMessage(m.chat, {
@@ -43,12 +43,12 @@ let handler = async (m, { conn, text }) => {
       mimetype: 'application/vnd.android.package-archive'
     }, { quoted: m })
 
-    await m.react('✅')
+    await m.react('🩸')
 
   } catch (e) {
     console.log(e)
-    await m.react('❌')
-    conn.sendMessage(m.chat, { text: '❌ Error al buscar' }, { quoted: m })
+    await m.react('💀')
+    conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error al buscar' }, { quoted: m })
   }
 }
 
