@@ -30,7 +30,7 @@ const handler = async (m, { conn }) => {
 
     if (stdout.includes('Already up to date')) {
       await conn.sendMessage(m.chat, {
-        image: { url: 'https://files.catbox.moe/ks2023.jpg' },
+        image: { url: 'https://files.catbox.moe/zl732h.jpg' },
         caption: '⛓️ DENJI BOT ⛓️\n\n⚡ Denji ya está en su mejor versión\n🔗 No hay actualizaciones pendientes\n\n> Solicitado por @' + who.split('@')[0],
         mentions: [who]
       }, { quoted: m })
