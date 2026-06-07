@@ -72,7 +72,10 @@ function buildParams(extra = {}) {
 
 async function getMegaMeta(fileUrl) {
   const url  = `${API_BASE}/mega?${buildParams({ mode: 'link', url: fileUrl })}`
-  const res  = await fetch(url, { timeout: 45_000 })
+  const res  = await fetch(url, {
+    timeout: 45_000,
+    headers: API_KEY ? { 'x-api-key': API_KEY } : {}
+  })
   const data = await res.json()
   if (!data?.ok) throw new Error(data?.detail || data?.message || 'No se pudo obtener info del archivo')
   return {
