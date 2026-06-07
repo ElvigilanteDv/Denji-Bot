@@ -1,5 +1,4 @@
 let handler = async (m, { conn, text, usedPrefix, command }) => {
-  if (!global.isMain) return m.reply('𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ Este comando solo está disponible en el bot principal')
 
   if (!text) return m.reply(`𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Envía una invitación al grupo por número\n\n> ${usedPrefix}${command} <número>\n> Ejemplo: ${usedPrefix}${command} 523218138672`)
 
