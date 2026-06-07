@@ -77,6 +77,7 @@ async function getMegaMeta(fileUrl) {
     headers: API_KEY() ? { 'x-api-key': API_KEY() } : {}
   })
   const data = await res.json()
+  console.log('[MEGA DEBUG]', JSON.stringify(data))
   if (!data?.ok) throw new Error(data?.detail || data?.message || 'No se pudo obtener info del archivo')
   return {
     title:     safeFileName(data.title || data.filename || 'MEGA File'),
