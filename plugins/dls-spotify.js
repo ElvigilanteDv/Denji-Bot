@@ -24,9 +24,9 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
         imageMessage: media.imageMessage
       },
       body: {
-        text: '⛓️ DENJI BOT ⛓️\n\n⚡ Busca música en Spotify\n\n> ' + usedPrefix + command + ' <nombre>\n> Ejemplo: ' + usedPrefix + command + ' Twice\n> 💎 Cuesta 1 diamante por descarga'
+        text: '🩸 DENJI BOT 🩸\n\n🔪 Busca música en Spotify\n\n> ' + usedPrefix + command + ' <nombre>\n> Ejemplo: ' + usedPrefix + command + ' Twice\n> 💎 Cuesta 1 diamante por descarga'
       },
-      footer: { text: '⛓️ DENJI BOT ⛓️' },
+      footer: { text: '🩸 DENJI BOT 🩸' },
       nativeFlowMessage: {
         buttons: [{
           name: 'single_select',
@@ -54,7 +54,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     return
   }
 
-  await m.react('🔍')
+  await m.react('🩸')
 
   try {
     let searchUrl = `https://api.delirius.store/search/spotify?q=${encodeURIComponent(text)}&limit=10`
@@ -88,9 +88,9 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
         imageMessage: media ? media.imageMessage : undefined
       },
       body: {
-        text: '⛓️ DENJI BOT ⛓️\n\n⚡ Búsqueda: ' + text + '\n\n> Elige una canción\n> 💎 1 diamante al descargar'
+        text: '🩸 DENJI BOT 🩸\n\n🔪 Búsqueda: ' + text + '\n\n> Elige una canción\n> 💎 1 diamante al descargar'
       },
-      footer: { text: '⛓️ DENJI BOT ⛓️' },
+      footer: { text: '🩸 DENJI BOT 🩸' },
       nativeFlowMessage: {
         buttons: [{
           name: 'single_select',
@@ -110,8 +110,8 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 
   } catch (e) {
     console.log(e)
-    await m.react('❌')
-    conn.sendMessage(m.chat, { text: '⛓️ DENJI BOT ⛓️\n\n❌ No se encontraron resultados' }, { quoted: m })
+    await m.react('💀')
+    conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 No se encontraron resultados' }, { quoted: m })
   }
 }
 
@@ -133,7 +133,7 @@ handler.before = async (m, { conn }) => {
 
     let misDiamantes = user.diamantes || user.diamond || 0
     if (misDiamantes < 1) {
-      await conn.sendMessage(m.chat, { text: '⛓️ DENJI BOT ⛓️\n\n❌ No tienes 1 diamante\n\n> Usa #work para ganar' }, { quoted: m })
+      await conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 No tienes 1 diamante\n\n> Usa #work para ganar' }, { quoted: m })
       return true
     }
 
@@ -149,8 +149,8 @@ handler.before = async (m, { conn }) => {
       user.diamond = misDiamantes - 1
     }
 
-    await m.react('⏳')
-    await conn.sendMessage(m.chat, { text: '⛓️ DENJI BOT ⛓️\n\n⚡ Descargando...\n💎 -1 diamante' }, { quoted: m })
+    await m.react('⚰️')
+    await conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n🔪 Descargando...\n💎 -1 diamante' }, { quoted: m })
 
     let downloadUrl = `https://api.delirius.store/download/spotifydl?url=${encodeURIComponent(spotifyUrl)}`
     let res = await fetch(downloadUrl)
@@ -175,16 +175,16 @@ handler.before = async (m, { conn }) => {
 
     await conn.sendMessage(m.chat, {
       image: { url: json.data.image || 'https://files.catbox.moe/r60c8l.jpg' },
-      caption: '⛓️ DENJI BOT ⛓️\n\n⚡ Descarga completada\n\n❀ Canción: ' + (json.data.title || titulo) + '\n❀ Artista: ' + (json.data.author || 'Desconocido') + '\n❀ Diamantes restantes: ' + total
+      caption: '🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 Canción: ' + (json.data.title || titulo) + '\n💀 Artista: ' + (json.data.author || 'Desconocido') + '\n🩸 Diamantes restantes: ' + total
     }, { quoted: m })
 
-    await m.react('✅')
+    await m.react('🩸')
     return true
 
   } catch (e) {
     console.log(e)
-    await conn.sendMessage(m.chat, { text: '⛓️ DENJI BOT ⛓️\n\n❌ Error: ' + e.message }, { quoted: m })
-    await m.react('❌')
+    await conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message }, { quoted: m })
+    await m.react('💀')
     return true
   }
 }
