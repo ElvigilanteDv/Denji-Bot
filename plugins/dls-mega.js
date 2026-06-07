@@ -4,8 +4,8 @@ import path from 'path'
 import os from 'os'
 import { pipeline } from 'stream/promises'
 
-const API_BASE    = process.env.DV_API_URL || 'https://dv-yer-api.online'
-const API_KEY     = process.env.DV_API_KEY || ''
+const API_BASE    = () => process.env.DV_API_URL || 'https://dv-yer-api.online'
+const API_KEY     = () => process.env.DV_API_KEY || ''
 const MAX_BYTES   = 1024 * 1024 * 1024
 const REQ_TIMEOUT = 120_000
 const TMP_DIR     = path.join(os.tmpdir(), 'denji-mega')
@@ -66,15 +66,15 @@ function normalizeFileName(name) {
 
 function buildParams(extra = {}) {
   const params = new URLSearchParams({ ...extra })
-  if (API_KEY) params.set('apikey', API_KEY) // ← apikey, no api_key
+  const key = API_KEY(); if (key) params.set('apikey', key) // ← apikey, no api_key
   return params.toString()
 }
 
 async function getMegaMeta(fileUrl) {
-  const url  = `${API_BASE}/mega?${buildParams({ mode: 'link', url: fileUrl })}`
+  const url  = `${API_BASE()}/mega?${buildParams({ mode: 'link', url: fileUrl })}`
   const res  = await fetch(url, {
     timeout: 45_000,
-    headers: API_KEY ? { 'x-api-key': API_KEY } : {}
+    headers: API_KEY() ? { 'x-api-key': API_KEY() } : {}
   })
   const data = await res.json()
   if (!data?.ok) throw new Error(data?.detail || data?.message || 'No se pudo obtener info del archivo')
