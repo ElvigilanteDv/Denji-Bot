@@ -66,7 +66,7 @@ function normalizeFileName(name) {
 
 function buildParams(extra = {}) {
   const params = new URLSearchParams({ ...extra })
-  if (API_KEY) params.set('api_key', API_KEY)
+  if (API_KEY) params.set('apikey', API_KEY) // ← apikey, no api_key
   return params.toString()
 }
 
@@ -117,7 +117,6 @@ async function downloadFromStream(streamUrl, outputPath) {
   return size
 }
 
-// ─── HANDLER ──────────────────────────────────────────────
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   if (!text || !text.includes('mega.nz')) {
     return conn.sendMessage(m.chat, {
