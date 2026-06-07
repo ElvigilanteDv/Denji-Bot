@@ -1,4 +1,3 @@
-
 import fetch from 'node-fetch'
 import {
   generateWAMessageFromContent,
@@ -8,11 +7,14 @@ import {
 const isFolderUrl = url => url.includes('/folder/') || url.includes('mediafire.com/folder')
 const isFileUrl = url => url.includes('/file/') || url.includes('mediafire.com/file')
 
+const MAX_SIZE = 2 * 1024 * 1024 * 1024        // 2 GB  → bloquear
+const WARN_SIZE = 200 * 1024 * 1024             // 200 MB → advertir
+
 const formatSize = bytes => {
   const n = parseInt(bytes)
   if (isNaN(n)) return 'Desconocido'
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)} MB`
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)} KB`
   return `${n} B`
 }
@@ -26,6 +28,61 @@ const getIcon = mime => {
   if (mime.includes('pdf')) return '📕'
   if (mime.includes('apk')) return '📱'
   return '📄'
+}
+
+// ── Verifica el tamaño REAL haciendo HEAD al link directo ──
+const getRealSize = async (url) => {
+  try {
+    const res = await fetch(url, { method: 'HEAD', timeout: 10000 })
+    const cl = res.headers.get('content-length')
+    return cl ? parseInt(cl) : null
+  } catch {
+    return null
+  }
+}
+
+// ── Descarga el archivo en buffer y lo reenvía ──
+const downloadAndSend = async (conn, m, fileLink, filename, mime, size) => {
+  const realSize = await getRealSize(fileLink)
+  const finalSize = realSize ?? parseInt(size) ?? 0
+
+  // Bloquear si supera 2 GB
+  if (finalSize >= MAX_SIZE) {
+    await m.react('❌')
+    return conn.sendMessage(m.chat, {
+      text: `🩸 DENJI BOT 🩸\n\n❌ Archivo demasiado grande\n\n💀 Tamaño: ${formatSize(finalSize)}\n💀 Límite: 2 GB\n\n> Descárgalo manualmente desde Mediafire`
+    }, { quoted: m })
+  }
+
+  // Advertir si supera 200 MB pero es menor a 2 GB
+  if (finalSize >= WARN_SIZE) {
+    await conn.sendMessage(m.chat, {
+      text: `🩸 DENJI BOT 🩸\n\n⚠️ Archivo grande (${formatSize(finalSize)}), esto puede tardar varios minutos...`
+    }, { quoted: m })
+  }
+
+  // Descargar en buffer para evitar que WhatsApp recorte el stream
+  await conn.sendMessage(m.chat, {
+    text: `🩸 DENJI BOT 🩸\n\n⚰️ Descargando ${filename}...`
+  }, { quoted: m })
+
+  const fileRes = await fetch(fileLink, { timeout: 300000 }) // 5 min timeout
+  if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status} al descargar`)
+
+  const buffer = Buffer.from(await fileRes.arrayBuffer())
+
+  // Verificar que el buffer no esté vacío o truncado
+  if (buffer.length < 1024) throw new Error(`Archivo descargado muy pequeño (${buffer.length} bytes), posible error`)
+  if (finalSize > 0 && buffer.length < finalSize * 0.95) {
+    throw new Error(`Descarga incompleta: se esperaban ${formatSize(finalSize)}, se obtuvieron ${formatSize(buffer.length)}`)
+  }
+
+  await conn.sendMessage(m.chat, {
+    document: buffer,
+    fileName: filename,
+    mimetype: mime,
+    caption: `🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 Archivo: ${filename}\n💀 Tamaño real: ${formatSize(buffer.length)}\n💀 Tipo: ${mime}`
+  }, { quoted: m })
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
@@ -47,22 +104,30 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   if (isFolderUrl(text)) {
     try {
       const apiUrl = `https://api.delirius.store/download/mediafire?url=${encodeURIComponent(text)}`
-      const res = await fetch(apiUrl)
+      const res = await fetch(apiUrl, { timeout: 30000 })
       const json = await res.json()
 
       if (!json.status || !json.data?.length) throw new Error('No se pudo obtener la carpeta')
 
       const archivos = json.data.slice(0, 10)
-      const rows = archivos.map((file, i) => ({
-        header: getIcon(file.mime) + ' ' + (file.mime || 'archivo').split('/')[1]?.toUpperCase(),
-        title: (file.filename || 'Sin nombre').substring(0, 35),
-        description: '💀 ' + formatSize(file.size) + ' | 📅 ' + (file.uploaded?.split(' ')[0] || '?'),
-        id: 'mfdl_' + i + '_' + Buffer.from(file.link).toString('base64') + '_' + Buffer.from(file.filename || 'file').toString('base64') + '_' + (file.mime || 'application/octet-stream')
-      }))
+      const rows = archivos.map((file, i) => {
+        const size = parseInt(file.size) || 0
+        const tooLarge = size >= MAX_SIZE
+        const icon = tooLarge ? '❌' : getIcon(file.mime)
+        const sizeLabel = formatSize(file.size) + (tooLarge ? ' (muy grande)' : '')
+
+        return {
+          header: icon + ' ' + (file.mime || 'archivo').split('/')[1]?.toUpperCase(),
+          title: (file.filename || 'Sin nombre').substring(0, 35),
+          description: `💀 ${sizeLabel} | 📅 ${file.uploaded?.split(' ')[0] || '?'}`,
+          // Guardamos el tamaño en el id para verificarlo antes de descargar
+          id: 'mfdl_' + i + '_' + Buffer.from(file.link).toString('base64') + '_' + Buffer.from(file.filename || 'file').toString('base64') + '_' + (file.mime || 'application/octet-stream') + '_' + (file.size || '0')
+        }
+      })
 
       const interactiveMessage = proto.Message.InteractiveMessage.create({
         header: { title: 'DENJI BOT - MEDIAFIRE', subtitle: 'Selecciona un archivo', hasMediaAttachment: false },
-        body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Carpeta encontrada\n💀 ${json.data.length} archivos\n\n> Elige uno para descargar` },
+        body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Carpeta encontrada\n💀 ${json.data.length} archivos\n\n❌ = mayor a 2GB (no descargable)\n\n> Elige uno para descargar` },
         footer: { text: '🩸 DENJI BOT 🩸' },
         nativeFlowMessage: {
           buttons: [{
@@ -93,29 +158,15 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   if (isFileUrl(text)) {
     try {
       const apiUrl = `https://api.delirius.store/download/mediafire?url=${encodeURIComponent(text)}`
-      const res = await fetch(apiUrl)
+      const res = await fetch(apiUrl, { timeout: 30000 })
       const json = await res.json()
 
       if (!json.status || !json.data) throw new Error('No se pudo obtener el archivo')
 
-      // Si devuelve un solo archivo
       const file = Array.isArray(json.data) ? json.data[0] : json.data
       if (!file?.link) throw new Error('Sin link de descarga')
 
-      await conn.sendMessage(m.chat, {
-        text: `🩸 DENJI BOT 🩸\n\n⚰️ Descargando archivo...`
-      }, { quoted: m })
-
-      const mime = file.mime || 'application/octet-stream'
-      const filename = file.filename || 'archivo'
-
-      await conn.sendMessage(m.chat, {
-        document: { url: file.link },
-        fileName: filename,
-        mimetype: mime,
-        caption: `🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 Archivo: ${filename}\n💀 Tamaño: ${formatSize(file.size)}\n💀 Tipo: ${mime}`
-      }, { quoted: m })
-
+      await downloadAndSend(conn, m, file.link, file.filename || 'archivo', file.mime || 'application/octet-stream', file.size)
       await m.react('🩸')
 
     } catch (e) {
@@ -143,19 +194,12 @@ handler.before = async (m, { conn }) => {
     const linkBase64 = parts[2]
     const nameBase64 = parts[3]
     const mime = parts[4] || 'application/octet-stream'
+    const size = parts[5] || '0'
     const fileLink = Buffer.from(linkBase64, 'base64').toString()
     const filename = Buffer.from(nameBase64, 'base64').toString()
 
     await m.react('⚰️')
-    await conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n🔪 Descargando...' }, { quoted: m })
-
-    await conn.sendMessage(m.chat, {
-      document: { url: fileLink },
-      fileName: filename,
-      mimetype: mime,
-      caption: `🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 ${filename}`
-    }, { quoted: m })
-
+    await downloadAndSend(conn, m, fileLink, filename, mime, size)
     await m.react('🩸')
     return true
 
