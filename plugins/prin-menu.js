@@ -19,26 +19,27 @@ const tags = {
 
 const defaultMenu = {
   before: `
-⛓️ DENJI BOT ⛓️
-🔗 チェンソーマン 🔗
+🩸━━━━━━━━━━━━━━━━🩸
+💀 D E N J I  B O T 💀
+🩸━━━━━━━━━━━━━━━━🩸
+🔪 チェンソーマン 🔪
+🩸 El Hombre Motosierra 🩸
 
-⚡ El Hombre Motosierra ⚡
-
-🕐 %time
-👥 %totalreg usuarios
-⚙️ %totalcmd comandos
-⏱️ %uptime activo
-
+⚰️ Hora: %time
+💀 Usuarios: %totalreg
+🔪 Comandos: %totalcmd
+⛓️ Activo: %uptime
 %readmore
 `,
-  header: '\n▸ %category (%count cmd)\n',
-  body: '  ⛓️ %cmd',
-  desc: '\n     ↳ %desc',
+  header: '\n🩸━━━ %category (%count cmd) ━━━🩸\n',
+  body: '  💀 %cmd',
+  desc: '\n     🔪 %desc',
   footer: '',
   after: `
-
-⛓️ DENJI BOT ⛓️
-> Creado por JM`
+🩸━━━━━━━━━━━━━━━━🩸
+💀 D E N J I  B O T 💀
+🔪 Creado por JM 🔪
+🩸━━━━━━━━━━━━━━━━🩸`
 }
 
 let handler = async (m, { conn, usedPrefix: _p, command }) => {
@@ -78,12 +79,11 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       .replace(/%uptime/g, Math.floor(process.uptime() / 60) + 'm ' + Math.floor(process.uptime() % 60) + 's')
 
     if (tagSeleccionada) {
-      textoMenu = textoMenu.replace('DENJI BOT', 'DENJI BOT - ' + tags[tagSeleccionada])
+      textoMenu = textoMenu.replace('D E N J I  B O T', 'DENJI BOT - ' + tags[tagSeleccionada])
     }
 
     for (let tag of Object.keys(tags)) {
       if (tagSeleccionada && tag !== tagSeleccionada) continue
-
       const cmds = help
         .filter(menu => menu.tags?.includes(tag))
         .map(menu => menu.help.map(h =>
@@ -113,7 +113,7 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
 
   } catch (e) {
     console.log(e)
-    await conn.sendMessage(m.chat, { text: `❌ Error:\n${e}` }, { quoted: m })
+    await conn.sendMessage(m.chat, { text: `🩸 DENJI BOT 🩸\n\n💀 Error:\n${e}` }, { quoted: m })
   }
 }
 
