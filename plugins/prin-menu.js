@@ -19,27 +19,23 @@ const tags = {
 
 const defaultMenu = {
   before: `
-🩸━━━━━━━━━━━━━━━━🩸
-💀 D E N J I  B O T 💀
-🩸━━━━━━━━━━━━━━━━🩸
-🔪 チェンソーマン 🔪
-🩸 El Hombre Motosierra 🩸
+🩸 D E N J I  B O T 🩸
+💀 チェンソーマン 💀
+🔪 El Hombre Motosierra 🔪
 
-⚰️ Hora: %time
-💀 Usuarios: %totalreg
-🔪 Comandos: %totalcmd
-⛓️ Activo: %uptime
+⚰️ %time
+💀 %totalreg usuarios registrados
+🔪 %totalcmd comandos activos
+🩸 %uptime activo
 %readmore
 `,
-  header: '\n🩸━━━ %category (%count cmd) ━━━🩸\n',
-  body: '  💀 %cmd',
-  desc: '\n     🔪 %desc',
+  header: '\n💀 %category 〔%count〕\n',
+  body: '  🩸 %cmd',
+  desc: '\n     ↳🔪 %desc',
   footer: '',
   after: `
-🩸━━━━━━━━━━━━━━━━🩸
-💀 D E N J I  B O T 💀
-🔪 Creado por JM 🔪
-🩸━━━━━━━━━━━━━━━━🩸`
+🩸 D E N J I  B O T 🩸
+💀 Creado por JM 💀`
 }
 
 let handler = async (m, { conn, usedPrefix: _p, command }) => {
@@ -79,7 +75,7 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       .replace(/%uptime/g, Math.floor(process.uptime() / 60) + 'm ' + Math.floor(process.uptime() % 60) + 's')
 
     if (tagSeleccionada) {
-      textoMenu = textoMenu.replace('D E N J I  B O T', 'DENJI BOT - ' + tags[tagSeleccionada])
+      textoMenu = textoMenu.replace('D E N J I  B O T', 'DENJI BOT ' + tags[tagSeleccionada])
     }
 
     for (let tag of Object.keys(tags)) {
