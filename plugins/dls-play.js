@@ -92,7 +92,7 @@ async function downloadToFile(remoteUrl, ext) {
   const res = await axios.get(remoteUrl, {
     responseType: 'stream',
     timeout: FILE_TIMEOUT,
-    headers: { 'User-Agent': UA, 'Accept': '*/*' },
+    headers: { 'User-Agent': UA, 'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.5', 'Accept-Language': 'es-ES,es;q=0.9', 'Accept-Encoding': 'identity', 'Referer': 'https://dv-yer-api.online/', 'Origin': 'https://dv-yer-api.online', 'Sec-Fetch-Dest': 'video', 'Sec-Fetch-Mode': 'no-cors', 'Sec-Fetch-Site': 'same-origin' },
     maxRedirects: 5,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
@@ -122,7 +122,6 @@ async function downloadToFile(remoteUrl, ext) {
 
   return tempPath
 }
-
 async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName }) {
   const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
   const safeName = sanitizeFileName(fileName || title) + ext
@@ -150,7 +149,6 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
     console.log('[YT] URL directa falló, descargando local...', e.message)
   }
 
-  // Intento 2: descarga local
   let tempPath = null
   try {
     tempPath = await downloadToFile(remoteUrl, ext)
@@ -300,6 +298,7 @@ handler.before = async (m, { conn }) => {
     const titulo = Buffer.from(titleB64, 'base64url').toString()
 
     const tipo    = fmt === 'ytmp3' ? 'mp3' : 'mp4'
+
     const quality = fmt === 'ytmp4480' ? '480p' : '360p'
 
     await m.react('⚰️')
