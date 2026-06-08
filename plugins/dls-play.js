@@ -5,7 +5,7 @@ import {
   proto
 } from '@whiskeysockets/baileys'
 
-const DV_API_URL = process.env.DV_API_URL 
+const DV_API_URL = process.env.DV_API_URL
 const DV_API_KEY = process.env.DV_API_KEY
 
 const getVideoId = (text = '') => {
@@ -19,6 +19,12 @@ const isYTUrl = (url = '') => /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/
 
 const sanitizeFileName = (name = 'archivo') =>
   name.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'archivo'
+
+const buildYTUrl = (v) => {
+  if (v.url && isYTUrl(v.url)) return v.url
+  if (v.videoId) return `https://www.youtube.com/watch?v=${v.videoId}`
+  return null
+}
 
 async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
   const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
@@ -42,16 +48,19 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   await m.react('🩸')
 
   try {
-    // Si es link directo, saltarse búsqueda
     const video_id = getVideoId(input_text)
     let results = []
 
-    if (video_id || isYTUrl(input_text)) {
-      const info = await yts({ videoId: video_id || input_text })
-      if (info?.videoId) results = [info]
-    } else {
+    if (video_id) {
+      try {
+        const info = await yts({ videoId: video_id })
+        if (info?.videoId) results = [info]
+      } catch {}
+    }
+
+    if (!results.length) {
       const search = await yts(input_text)
-      results = search.videos?.slice(0, 8) || []
+      results = (search.videos || []).slice(0, 8)
     }
 
     if (!results.length) {
@@ -61,16 +70,24 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       }, { quoted: m })
     }
 
-    const rows = results.map((v, i) => ({
+    const validos = results.filter(v => buildYTUrl(v))
+    if (!validos.length) {
+      await m.react('💀')
+      return conn.sendMessage(m.chat, {
+        text: '🩸 DENJI BOT 🩸\n\n💀 No se pudo obtener el link del video'
+      }, { quoted: m })
+    }
+
+    const rows = validos.map((v, i) => ({
       header: '🎬 ' + (v.timestamp || '?'),
       title: (v.title || 'Sin título').substring(0, 35),
       description: '💀 ' + (v.author?.name || v.author || 'Desconocido') + ' | 👁️ ' + (v.views || 0).toLocaleString(),
-      id: 'ytdv_' + i + '_' + Buffer.from(v.url || `https://youtu.be/${v.videoId}`).toString('base64') + '_' + Buffer.from((v.title || '').substring(0, 50)).toString('base64')
+      id: 'ytdv_' + i + '_' + Buffer.from(buildYTUrl(v)).toString('base64') + '_' + Buffer.from((v.title || '').substring(0, 50)).toString('base64')
     }))
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
       header: { title: 'DENJI BOT - YOUTUBE', subtitle: 'Selecciona un video', hasMediaAttachment: false },
-      body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Búsqueda: ${input_text}\n💀 ${results.length} resultados\n\n> Elige uno` },
+      body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Búsqueda: ${input_text}\n💀 ${validos.length} resultados\n\n> Elige uno` },
       footer: { text: '🩸 DENJI BOT 🩸' },
       nativeFlowMessage: {
         buttons: [{
@@ -104,12 +121,10 @@ handler.before = async (m, { conn }) => {
     const data = JSON.parse(nativeFlow.paramsJson || '{}')
     const id = data.id || data.selectedId || data.selectedRowId || null
 
-    // PASO 2: eligió video, mostrar opciones MP3 / MP4
     if (id?.startsWith('ytdv_')) {
       const parts = id.split('_')
       const urlBase64 = parts[2]
       const titleBase64 = parts[3]
-      const ytUrl = Buffer.from(urlBase64, 'base64').toString()
       const titulo = Buffer.from(titleBase64, 'base64').toString()
 
       const interactiveMessage = proto.Message.InteractiveMessage.create({
@@ -157,10 +172,9 @@ handler.before = async (m, { conn }) => {
       return true
     }
 
-    // PASO 3: eligió formato, descargar
     if (id?.startsWith('ytfmt_')) {
       const parts = id.split('_')
-      const formato = parts[1]       // mp3 / mp4480 / mp4720
+      const formato = parts[1]
       const urlBase64 = parts[2]
       const titleBase64 = parts[3]
       const ytUrl = Buffer.from(urlBase64, 'base64').toString()
@@ -208,9 +222,9 @@ handler.before = async (m, { conn }) => {
   }
 }
 
-handler.help = ['play3']
+handler.help = ['play']
 handler.tags = ['downloader']
-handler.command = /^(play3|yt|youtube|ytdv)$/i
+handler.command = /^(play|yt|youtube)$/i
 handler.desc = 'Busca y descarga música y videos de YouTube'
 
 export default handler
