@@ -4,10 +4,23 @@ import path from 'path'
 const settingsDir = path.resolve('./json')
 const settingsPath = path.join(settingsDir, 'settings.json')
 
+const ownerNumbers = [
+  '528444966582',
+  '573223090406'
+]
+
+function getOwners() {
+  return ownerNumbers.map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net')
+}
+
+function isOwnerUser(jid = '') {
+  return getOwners().includes(jid)
+}
+
 function ensureSettingsFile() {
   if (!fs.existsSync(settingsDir)) fs.mkdirSync(settingsDir, { recursive: true })
   if (!fs.existsSync(settingsPath)) {
-    fs.writeFileSync(settingsPath, JSON.stringify({}, null, 2))
+    fs.writeFileSync(settingsPath, JSON.stringify({}, null, 2), 'utf8')
   }
 }
 
@@ -22,7 +35,19 @@ function readSettings() {
 
 function saveSettings(data) {
   ensureSettingsFile()
-  fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2))
+  fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8')
+}
+
+function getDefaultConfig() {
+  return {
+    antilink: false,
+    antilinkMode: 'delete',
+    antilinkWarnLimit: 3,
+    antilinkWarnings: {},
+    welcome: false,
+    antiarabe: false,
+    modoadmin: false
+  }
 }
 
 function getChatConfig(botNumber, chatId) {
@@ -30,15 +55,7 @@ function getChatConfig(botNumber, chatId) {
 
   if (!settings[botNumber]) settings[botNumber] = {}
   if (!settings[botNumber][chatId]) {
-    settings[botNumber][chatId] = {
-      antilink: false,
-      antilinkMode: 'delete',
-      antilinkWarnLimit: 3,
-      antilinkWarnings: {},
-      welcome: false,
-      antiarabe: false,
-      modoadmin: false
-    }
+    settings[botNumber][chatId] = getDefaultConfig()
     saveSettings(settings)
   }
 
@@ -50,13 +67,7 @@ function updateChatConfig(botNumber, chatId, newData) {
 
   if (!settings[botNumber]) settings[botNumber] = {}
   settings[botNumber][chatId] = {
-    antilink: false,
-    antilinkMode: 'delete',
-    antilinkWarnLimit: 3,
-    antilinkWarnings: {},
-    welcome: false,
-    antiarabe: false,
-    modoadmin: false,
+    ...getDefaultConfig(),
     ...(settings[botNumber][chatId] || {}),
     ...newData
   }
@@ -96,7 +107,7 @@ ${chat.antiarabe ? '✅' : '❌'} antiarabe
 ${chat.modoadmin ? '✅' : '❌'} modoadmin
 
 🔪 modo antilink: *${chat.antilinkMode}*
-☠️ límite: *${chat.antilinkWarnLimit}*
+☠️ límite de advertencias: *${chat.antilinkWarnLimit}*
 
 > Usa *.on <función>* o *.off <función>*
 > Usa *.antilink delete* o *.antilink warnkick*`
@@ -106,16 +117,17 @@ ${chat.modoadmin ? '✅' : '❌'} modoadmin
     updateChatConfig(botNumber, chatId, { [type]: enable })
 
     if (type === 'antilink' && enable) {
+      const updated = getChatConfig(botNumber, chatId)
       return conn.sendMessage(m.chat, {
         text:
 `⛓️ *DENJI BOT* ⛓️
 
 🩸 *ANTI-LINK ACTIVADO* 🩸
 🔪 Todo enlace será rastreado.
-☠️ Nada escapará del matadero.
-🫀 Modo actual: *${chat.antilinkMode}*
+☠️ El matadero ya abrió sus puertas.
+🫀 Modo actual: *${updated.antilinkMode}*
 
-> El olor a link ya quedó marcado en este grupo.`
+> El demonio del link ha sido liberado.`
       }, { quoted: m })
     }
 
@@ -125,10 +137,10 @@ ${chat.modoadmin ? '✅' : '❌'} modoadmin
 `⛓️ *DENJI BOT* ⛓️
 
 ☠️ *ANTI-LINK DESACTIVADO* ☠️
-🪦 La cacería terminó.
-🩸 Los links ya no serán mutilados.
+🪦 La carnicería se detuvo.
+🩸 Los links ya no serán cazados.
 
-> El demonio vuelve a dormir.`
+> Por ahora, el matadero quedó en silencio.`
       }, { quoted: m })
     }
 
@@ -137,7 +149,7 @@ ${chat.modoadmin ? '✅' : '❌'} modoadmin
 `⛓️ *DENJI BOT* ⛓️
 
 ${enable ? '🩸' : '☠️'} *${type.toUpperCase()} ${enable ? 'ACTIVADO' : 'DESACTIVADO'}*
-> La configuración fue escrita con sangre.`
+> La configuración ha sido escrita con sangre.`
     }, { quoted: m })
   }
 
@@ -167,12 +179,16 @@ ${enable ? '🩸' : '☠️'} *${type.toUpperCase()} ${enable ? 'ACTIVADO' : 'DE
 
 🔪 *MODO DELETE ACTIVADO* 🔪
 🩸 Los links serán arrancados del chat.
-☠️ El usuario seguirá vivo... por ahora.`
+☠️ El usuario seguirá vivo... por ahora.
+
+> La sierra ya está encendida.`
         : `⛓️ *DENJI BOT* ⛓️
 
 ☠️ *MODO WARNKICK ACTIVADO* ☠️
 🩸 Cada link dejará una advertencia.
-🔪 A la tercera falta, el usuario será expulsado.`
+🔪 A la tercera falta, el usuario será ejecutado del grupo.
+
+> Tres heridas. Ninguna misericordia.`
     }, { quoted: m })
   }
 
@@ -183,6 +199,10 @@ ${enable ? '🩸' : '☠️'} *${type.toUpperCase()} ${enable ? 'ACTIVADO' : 'DE
       user = m.mentionedJid[0]
     } else if (m.quoted?.sender) {
       user = m.quoted.sender
+    } else if (m.quoted?.participant) {
+      user = m.quoted.participant
+    } else if (m.quoted?.key?.participant) {
+      user = m.quoted.key.participant
     } else if (args[0]) {
       user = args[0].replace(/[^0-9]/g, '') + '@s.whatsapp.net'
     }
@@ -201,6 +221,17 @@ o responde un mensaje con *.resetwarn*`
       }, { quoted: m })
     }
 
+    if (isOwnerUser(user)) {
+      return conn.sendMessage(m.chat, {
+        text:
+`⛓️ *DENJI BOT* ⛓️
+
+☠️ *ACCESO DENEGADO*
+🩸 No puedes tocar el expediente de un owner.
+🔪 Su nombre está fuera del matadero.`
+      }, { quoted: m })
+    }
+
     resetWarning(botNumber, chatId, user)
 
     return conn.sendMessage(m.chat, {
@@ -209,7 +240,7 @@ o responde un mensaje con *.resetwarn*`
 
 🩸 *SANGRE LIMPIADA* 🩸
 🔪 Se reiniciaron las advertencias de @${user.split('@')[0]}.
-☠️ Su expediente fue arrancado del matadero.`,
+☠️ Su historial fue arrancado del matadero.`,
       mentions: [user]
     }, { quoted: m })
   }
