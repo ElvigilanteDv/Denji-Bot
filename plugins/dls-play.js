@@ -5,8 +5,8 @@ import {
   proto
 } from '@whiskeysockets/baileys'
 
-const DV_API_URL = process.env.DV_API_URL
-const DV_API_KEY = process.env.DV_API_KEY
+const DV_API_URL = process.env.DV_API_URL || 'https://dv-yer-api.online'
+const DV_API_KEY = process.env.DV_API_KEY || 'dvyerDravenFX4'
 
 const getVideoId = (text = '') => {
   const match = text.match(
