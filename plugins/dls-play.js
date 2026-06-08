@@ -1,7 +1,5 @@
 import yts from 'yt-search'
 import axios from 'axios'
-import { gotScraping } from 'got-scraping'
-import { CookieJar } from 'tough-cookie'
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
@@ -49,96 +47,43 @@ const buildYTUrl = (v) => {
   return null
 }
 
-async function dvGetAudioLink(youtubeUrl) {
-  const res = await axios.get(`${DV_API_URL}/ytmp3`, {
-    params: { url: youtubeUrl, apikey: DV_API_KEY, mode: 'link' },
+async function dvGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
+  const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
+  const params = {
+    url: youtubeUrl,
+    apikey: DV_API_KEY,
+    mode: 'link'
+  }
+  if (tipo === 'mp4') {
+    params.quality = quality
+    params.fast = true
+  }
+
+  const res = await axios.get(`${DV_API_URL}${endpoint}`, {
+    params,
     timeout: 90_000,
     headers: { 'User-Agent': UA, 'Accept': 'application/json' },
     validateStatus: () => true
   })
+
   const d = res.data
-  if (res.status >= 400 || d?.ok === false) throw new Error(d?.detail || d?.message || `HTTP ${res.status}`)
-  const remoteUrl = d?.download_url_full || d?.stream_url_full || d?.download_url || d?.stream_url || d?.url || ''
-  if (!remoteUrl) throw new Error('dv-yer no devolvió URL de audio')
-  return { remoteUrl, title: d?.title || '', fileName: d?.filename || '', quality: d?.quality || '128K' }
-}
-
-class Downr {
-  constructor() {
-    this.base = 'https://downr.org'
-    this.analytics = `${this.base}/.netlify/functions/analytics`
-    this.endpoint = `${this.base}/.netlify/functions/nyt`
+  if (res.status >= 400 || d?.ok === false) {
+    throw new Error(d?.detail || d?.message || `HTTP ${res.status}`)
   }
 
-  async createSession() {
-    const jar = new CookieJar()
-    await gotScraping(this.analytics, {
-      cookieJar: jar,
-      throwHttpErrors: false,
-      headerGeneratorOptions: { browsers: ['chrome'], operatingSystems: ['windows'] },
-      headers: { Referer: `${this.base}/`, Origin: this.base, Accept: '*/*' },
-      timeout: { request: 30000 }
-    })
-    return jar
-  }
+  const remoteUrl =
+    d?.download_url_full || d?.stream_url_full ||
+    d?.download_url || d?.stream_url || d?.url || ''
 
-  async fetchInfo(url, jar, retry = false) {
-    const response = await gotScraping(this.endpoint, {
-      method: 'POST',
-      cookieJar: jar,
-      throwHttpErrors: false,
-      headerGeneratorOptions: { browsers: ['chrome'], operatingSystems: ['windows'] },
-      headers: { Referer: `${this.base}/`, Origin: this.base, Accept: '*/*', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-      timeout: { request: 60000 }
-    })
+  if (!remoteUrl) throw new Error('dv-yer no devolvió URL de descarga')
 
-    if (response.statusCode === 403 && !retry) {
-      const newJar = await this.createSession()
-      return this.fetchInfo(url, newJar, true)
-    }
-    if (response.statusCode === 429) throw new Error('Rate limited en downr.org')
-    if (response.statusCode !== 200) throw new Error(`downr HTTP ${response.statusCode}`)
-
-    let data
-    try { data = JSON.parse(response.body) } catch { throw new Error('Respuesta inválida de downr') }
-    if (!data) throw new Error('Respuesta inválida de downr')
-    if (data.error) throw new Error(data.message || 'URL inválida')
-    return data
-  }
-
-  async getVideoUrl(youtubeUrl) {
-    const jar = await this.createSession()
-    const data = await this.fetchInfo(youtubeUrl, jar)
-
-    const medias = Array.isArray(data?.medias) ? data.medias : []
-    const videos = medias.filter(m => {
-      const type = String(m.type || '').toLowerCase()
-      const ext = String(m.ext || '').toLowerCase()
-      const mime = String(m.mime || m.mimetype || '').toLowerCase()
-      return type === 'video' || mime.startsWith('video/') || ['mp4', 'webm', 'mov', 'mkv'].includes(ext)
-    })
-
-    if (!videos.length) throw new Error('downr no encontró formatos de video')
-
-    const sorted = [...videos].sort((a, b) => {
-      const audioB = b.is_audio ? 1 : 0
-      const audioA = a.is_audio ? 1 : 0
-      if (audioB !== audioA) return audioB - audioA
-      return (Number(b.height) || 0) - (Number(a.height) || 0)
-    })
-
-    const best = sorted[0]
-    return {
-      remoteUrl: best.url,
-      title: String(data.title || '').trim(),
-      quality: best.quality || best.label || `${best.height}p` || '?',
-      fileName: sanitizeFileName(data.title || 'video') + '.mp4'
-    }
+  return {
+    remoteUrl,
+    title: d?.title || '',
+    fileName: d?.filename || '',
+    quality: d?.quality || quality
   }
 }
-
-const downr = new Downr()
 
 async function downloadToFile(remoteUrl, ext) {
   await ensureTmpDir()
@@ -205,6 +150,7 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
     console.log('[YT] URL directa falló, descargando local...', e.message)
   }
 
+  // Intento 2: descarga local
   let tempPath = null
   try {
     tempPath = await downloadToFile(remoteUrl, ext)
@@ -327,8 +273,8 @@ handler.before = async (m, { conn }) => {
                 title: '💀 ELIGE EL FORMATO',
                 rows: [
                   { header: '🎵 AUDIO', title: 'MP3 - 128K', description: '🔪 Solo audio', id: 'ytmp3' + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO', title: 'MP4 - 480p', description: '💀 Video normal', id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO HD', title: 'MP4 - 720p', description: '🩸 Alta definición', id: 'ytmp4720' + SEP + urlB64 + SEP + titleB64 }
+                  { header: '🎬 VIDEO SD', title: 'MP4 - 360p', description: '💀 Video estándar', id: 'ytmp4360' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬 VIDEO HD', title: 'MP4 - 480p', description: '🩸 Video HD', id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64 }
                 ]
               }]
             })
@@ -344,7 +290,7 @@ handler.before = async (m, { conn }) => {
       return true
     }
 
-    const formatos = ['ytmp3', 'ytmp4480', 'ytmp4720']
+    const formatos = ['ytmp3', 'ytmp4360', 'ytmp4480']
     const fmt = formatos.find(f => id?.startsWith(f + SEP))
     if (!fmt) return false
 
@@ -353,7 +299,8 @@ handler.before = async (m, { conn }) => {
     const ytUrl  = Buffer.from(urlB64,   'base64url').toString()
     const titulo = Buffer.from(titleB64, 'base64url').toString()
 
-    const tipo = fmt === 'ytmp3' ? 'mp3' : 'mp4'
+    const tipo    = fmt === 'ytmp3' ? 'mp3' : 'mp4'
+    const quality = fmt === 'ytmp4480' ? '480p' : '360p'
 
     await m.react('⚰️')
     await conn.sendMessage(m.chat, {
@@ -361,19 +308,22 @@ handler.before = async (m, { conn }) => {
     }, { quoted: m })
 
     let result
-    if (tipo === 'mp3') {
-
-      result = await dvGetAudioLink(ytUrl)
+    if (tipo === 'mp4') {
+      try {
+        result = await dvGetLink(ytUrl, 'mp4', quality)
+      } catch (e) {
+        console.log(`[YT] ${quality} falló (${e.message}), intentando 240p...`)
+        result = await dvGetLink(ytUrl, 'mp4', '240p')
+      }
     } else {
-
-      result = await downr.getVideoUrl(ytUrl)
+      result = await dvGetLink(ytUrl, 'mp3')
     }
 
     await sendMedia(conn, m, {
       tipo,
       remoteUrl: result.remoteUrl,
       title: result.title || titulo,
-      quality: result.quality || '?',
+      quality: result.quality,
       fileName: result.fileName || titulo
     })
 
