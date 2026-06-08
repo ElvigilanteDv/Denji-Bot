@@ -21,8 +21,8 @@ const sanitizeFileName = (name = 'archivo') =>
   name.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'archivo'
 
 const buildYTUrl = (v) => {
-  if (v.url && isYTUrl(v.url)) return v.url
   if (v.videoId) return `https://www.youtube.com/watch?v=${v.videoId}`
+  if (v.url && isYTUrl(v.url)) return v.url
   return null
 }
 
@@ -35,6 +35,8 @@ async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
   if (!json.ok) throw new Error(json.error || json.message || 'API sin resultado')
   return json
 }
+
+const SEP = '|~|'
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   const input_text = text?.trim()
@@ -63,27 +65,27 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       results = (search.videos || []).slice(0, 8)
     }
 
-    if (!results.length) {
-      await m.react('💀')
-      return conn.sendMessage(m.chat, {
-        text: '🩸 DENJI BOT 🩸\n\n💀 No se encontraron resultados\n\n> Intenta con otro nombre o link'
-      }, { quoted: m })
-    }
-
     const validos = results.filter(v => buildYTUrl(v))
+
     if (!validos.length) {
       await m.react('💀')
       return conn.sendMessage(m.chat, {
-        text: '🩸 DENJI BOT 🩸\n\n💀 No se pudo obtener el link del video'
+        text: '🩸 DENJI BOT 🩸\n\n💀 No se encontraron resultados'
       }, { quoted: m })
     }
 
-    const rows = validos.map((v, i) => ({
-      header: '🎬 ' + (v.timestamp || '?'),
-      title: (v.title || 'Sin título').substring(0, 35),
-      description: '💀 ' + (v.author?.name || v.author || 'Desconocido') + ' | 👁️ ' + (v.views || 0).toLocaleString(),
-      id: 'ytdv_' + i + '_' + Buffer.from(buildYTUrl(v)).toString('base64') + '_' + Buffer.from((v.title || '').substring(0, 50)).toString('base64')
-    }))
+    const rows = validos.map((v, i) => {
+      const ytUrl = buildYTUrl(v)
+      const titulo = (v.title || '').substring(0, 50)
+      // Padre nuestro, que estás en el cielo,santificado sea tu nombre;venga a nosotros tu reino;hágase tu voluntad en la tierra como en el cielo.Danos hoy nuestro pan de cada día;perdona nuestras ofensas,como también nosotros perdonamos a los que nos ofenden;no nos dejes caer en la tentación,y líbranos del mal.Amén
+      const payload = Buffer.from(ytUrl).toString('base64url') + SEP + Buffer.from(titulo).toString('base64url')
+      return {
+        header: '🎬 ' + (v.timestamp || '?'),
+        title: (v.title || 'Sin título').substring(0, 35),
+        description: '💀 ' + (v.author?.name || v.author || 'Desconocido') + ' | 👁️ ' + (v.views || 0).toLocaleString(),
+        id: 'ytdv' + SEP + payload
+      }
+    })
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
       header: { title: 'DENJI BOT - YOUTUBE', subtitle: 'Selecciona un video', hasMediaAttachment: false },
@@ -121,11 +123,13 @@ handler.before = async (m, { conn }) => {
     const data = JSON.parse(nativeFlow.paramsJson || '{}')
     const id = data.id || data.selectedId || data.selectedRowId || null
 
-    if (id?.startsWith('ytdv_')) {
-      const parts = id.split('_')
-      const urlBase64 = parts[2]
-      const titleBase64 = parts[3]
-      const titulo = Buffer.from(titleBase64, 'base64').toString()
+    if (id?.startsWith('ytdv' + SEP)) {
+      const payload = id.slice(('ytdv' + SEP).length)
+      const [urlB64, titleB64] = payload.split(SEP)
+      const ytUrl = Buffer.from(urlB64, 'base64url').toString()
+      const titulo = Buffer.from(titleB64, 'base64url').toString()
+
+      console.log('[YT] URL decodificada:', ytUrl) // debug
 
       const interactiveMessage = proto.Message.InteractiveMessage.create({
         header: { title: 'DENJI BOT - YOUTUBE', subtitle: '¿Cómo lo quieres?', hasMediaAttachment: false },
@@ -143,19 +147,19 @@ handler.before = async (m, { conn }) => {
                     header: '🎵 AUDIO',
                     title: 'MP3 - 128K',
                     description: '🔪 Solo audio en alta calidad',
-                    id: 'ytfmt_mp3_' + urlBase64 + '_' + titleBase64
+                    id: 'ytmp3' + SEP + urlB64 + SEP + titleB64
                   },
                   {
                     header: '🎬 VIDEO',
                     title: 'MP4 - 480p',
                     description: '💀 Video con audio incluido',
-                    id: 'ytfmt_mp4480_' + urlBase64 + '_' + titleBase64
+                    id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64
                   },
                   {
                     header: '🎬 VIDEO HD',
                     title: 'MP4 - 720p',
                     description: '🩸 Video en alta definición',
-                    id: 'ytfmt_mp4720_' + urlBase64 + '_' + titleBase64
+                    id: 'ytmp4720' + SEP + urlB64 + SEP + titleB64
                   }
                 ]
               }]
@@ -172,47 +176,48 @@ handler.before = async (m, { conn }) => {
       return true
     }
 
-    if (id?.startsWith('ytfmt_')) {
-      const parts = id.split('_')
-      const formato = parts[1]
-      const urlBase64 = parts[2]
-      const titleBase64 = parts[3]
-      const ytUrl = Buffer.from(urlBase64, 'base64').toString()
-      const titulo = Buffer.from(titleBase64, 'base64').toString()
+    const formatos = ['ytmp3', 'ytmp4480', 'ytmp4720']
+    const fmt = formatos.find(f => id?.startsWith(f + SEP))
+    if (!fmt) return false
 
-      await m.react('⚰️')
+    const payload = id.slice((fmt + SEP).length)
+    const [urlB64, titleB64] = payload.split(SEP)
+    const ytUrl = Buffer.from(urlB64, 'base64url').toString()
+    const titulo = Buffer.from(titleB64, 'base64url').toString()
+
+    console.log('[YT] Descargando URL:', ytUrl) // debug
+
+    const tipo = fmt === 'ytmp3' ? 'mp3' : 'mp4'
+    const quality = fmt === 'ytmp4720' ? '720p' : '480p'
+
+    await m.react('⚰️')
+    await conn.sendMessage(m.chat, {
+      text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${tipo === 'mp3' ? 'audio' : 'video'}...\n💀 ${titulo}`
+    }, { quoted: m })
+
+    const result = await dvDownload(ytUrl, tipo, quality)
+    const downloadUrl = result.download_url || result.stream_url
+    const finalTitle = result.title || titulo
+    const finalFilename = sanitizeFileName(result.filename || finalTitle)
+
+    if (tipo === 'mp3') {
       await conn.sendMessage(m.chat, {
-        text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${formato === 'mp3' ? 'audio' : 'video'}...\n💀 ${titulo}`
+        audio: { url: downloadUrl },
+        mimetype: 'audio/mpeg',
+        fileName: finalFilename + '.mp3',
+        caption: `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || '128K'}*`
       }, { quoted: m })
-
-      const tipo = formato === 'mp3' ? 'mp3' : 'mp4'
-      const quality = formato === 'mp4720' ? '720p' : '480p'
-      const result = await dvDownload(ytUrl, tipo, quality)
-      const downloadUrl = result.download_url || result.stream_url
-      const finalTitle = result.title || titulo
-      const finalFilename = sanitizeFileName(result.filename || finalTitle)
-
-      if (tipo === 'mp3') {
-        await conn.sendMessage(m.chat, {
-          audio: { url: downloadUrl },
-          mimetype: 'audio/mpeg',
-          fileName: finalFilename + '.mp3',
-          caption: `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || '128K'}*`
-        }, { quoted: m })
-      } else {
-        await conn.sendMessage(m.chat, {
-          video: { url: downloadUrl },
-          fileName: finalFilename + '.mp4',
-          mimetype: 'video/mp4',
-          caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
-        }, { quoted: m })
-      }
-
-      await m.react('🩸')
-      return true
+    } else {
+      await conn.sendMessage(m.chat, {
+        video: { url: downloadUrl },
+        fileName: finalFilename + '.mp4',
+        mimetype: 'video/mp4',
+        caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
+      }, { quoted: m })
     }
 
-    return false
+    await m.react('🩸')
+    return true
 
   } catch (e) {
     console.log(e)
