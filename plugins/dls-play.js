@@ -1,4 +1,5 @@
 import fetch from 'node-fetch'
+import yts from 'yt-search'
 import fs from 'fs'
 import path from 'path'
 import axios from 'axios'
@@ -21,6 +22,9 @@ const VIDEO_QUALITY = '360'  // sin "p" — ytmp4v2 lo requiere así
 
 const _processing = new Set()
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   🩸 FRASES DE DENJI 🩸
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const FRASES_DENJI = [
   '🩸 *"Oye... ya puedo respirar por fin..."*',
   '🔪 *"Solo quiero comer pan con mermelada..."*',
@@ -37,6 +41,9 @@ const FRASES_DENJI = [
 ]
 const frasesRandom = () => FRASES_DENJI[Math.floor(Math.random() * FRASES_DENJI.length)]
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   TEXTOS UI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const UI = {
   header:       '⛓️ DENJI BOT ⛓️',
   subHeader:    '🔪 YouTube — Chainsaw Style',
@@ -60,6 +67,9 @@ const UI = {
   linkInvalido:  '⛓️ *DENJI BOT* ⛓️\n\n💀 Ese link no es de YouTube, humano.\n🔪 *"¿Me estás tomando el pelo?"*'
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   UTILS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function safeFileName(name) {
   return String(name || 'media').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'media'
 }
@@ -101,6 +111,9 @@ function devolverDiamante(user, anterior) {
   else user.diamond = anterior
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   DESCARGA + FFMPEG
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function downloadVideo(downloadUrl, outputPath) {
   const response = await axios.get(downloadUrl, {
     responseType: 'stream', timeout: REQUEST_TIMEOUT,
@@ -140,6 +153,9 @@ async function normalizeForWhatsApp(inputPath, outputPath) {
   })
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   SEND AUDIO
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function sendAudio(conn, m, videoUrl, title) {
   const res = await fetch(`${DELIRIUS_API}/download/ytmp3?url=${encodeURIComponent(videoUrl)}`)
   const json = await res.json()
@@ -163,6 +179,9 @@ async function sendAudio(conn, m, videoUrl, title) {
   return finalTitle
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   SEND VIDEO  (usa ytmp4v2)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function sendVideo(conn, m, videoUrl, title) {
   // Intentar calidades en cascada
   const calidades = [VIDEO_QUALITY, '240', '144']
@@ -171,9 +190,10 @@ async function sendVideo(conn, m, videoUrl, title) {
     const res = await fetch(`${DELIRIUS_API}/download/ytmp4v2?url=${encodeURIComponent(videoUrl)}&format=${q}`)
     const data = await res.json()
     if (data.status && data.data?.download) { json = data; break }
-    console.log(`[YT] ${q}p falló:`, data.msg || 'sin URL')
+    console.log(`[YT] ${q}p falló:`, JSON.stringify(data).slice(0, 200))
   }
   if (!json) throw new Error('No se pudo obtener el video en ninguna calidad.')
+  console.log('[YT] video OK con calidad:', json.data?.format)
 
   const finalTitle = safeFileName(json.data.title || title)
   const rawFile    = path.join(TEMP_DIR, `yt_${Date.now()}.mp4`)
@@ -211,6 +231,9 @@ async function sendVideo(conn, m, videoUrl, title) {
   return finalTitle
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   MENÚ DE FORMATO
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function _mostrarSelectorFormato(conn, m, urlB64, titleB64, title, thumbnail) {
   let media = null
   if (thumbnail) {
@@ -229,6 +252,9 @@ async function _mostrarSelectorFormato(conn, m, urlB64, titleB64, title, thumbna
   await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   HANDLER PRINCIPAL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   const msgKey = `main_${m.id || m.key?.id}`
   if (_processing.has(msgKey)) return
@@ -273,21 +299,21 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   }
 
   try {
-    const res = await fetch(`${DELIRIUS_API}/search/ytsearch?q=${encodeURIComponent(input)}`)
-    const data = await res.json()
-    if (!data.status || !data.data?.length) throw new Error('No se encontraron resultados')
+    // yt-search local — no depende de API externa
+    const search = await yts(input)
+    const resultados = (search.videos || []).slice(0, 10)
+    if (!resultados.length) throw new Error('No se encontraron resultados')
 
-    const resultados = data.data.slice(0, 10)
     let media = null
     if (resultados[0]?.thumbnail) {
       try { media = await prepareWAMessageMedia({ image: { url: resultados[0].thumbnail } }, { upload: conn.waUploadToServer }) } catch {}
     }
 
     const rows = resultados.map((v) => ({
-      header: String(v.author?.name || 'Desconocido').slice(0, 20),
+      header: String(v.author?.name || v.author || 'Desconocido').slice(0, 20),
       title: String(v.title || '').slice(0, 35),
-      description: `⏱️ ${v.duration || '?'} | 👁️ ${Number(v.views || 0).toLocaleString()}`,
-      id: `ytsel~${Buffer.from(v.url).toString('base64')}~${Buffer.from(String(v.title || 'video')).toString('base64')}`
+      description: `⏱️ ${v.timestamp || '?'} | 👁️ ${Number(v.views || 0).toLocaleString()}`,
+      id: `ytsel~${Buffer.from(v.url || '').toString('base64')}~${Buffer.from(String(v.title || 'video')).toString('base64')}`
     }))
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
@@ -305,6 +331,9 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   }
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//   HANDLER.BEFORE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 handler.before = async (m, { conn }) => {
   if (m.isBaileys) return false
 
