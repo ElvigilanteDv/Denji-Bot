@@ -70,6 +70,7 @@ async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
 
 async function downloadToFile(streamUrl, outputPath) {
   ensureTmpDir()
+  console.log('[DL URL]', streamUrl)
 
   const response = await axios.get(streamUrl, {
     responseType: 'stream',
@@ -246,6 +247,8 @@ handler.before = async (m, { conn }) => {
 
     const result = await dvDownload(ytUrl, tipo, quality)
     const streamUrl = result.download_url_full || result.stream_url_full || result.download_url || result.stream_url || result.url
+    console.log("[DV RESULT]", JSON.stringify(result, null, 2))
+    console.log("[STREAM URL]", streamUrl)
     if (!streamUrl) throw new Error('La API no devolvió URL de descarga')
 
     const finalTitle = result.title || titulo
