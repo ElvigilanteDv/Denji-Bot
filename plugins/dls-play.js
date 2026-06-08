@@ -1,40 +1,42 @@
-//funcione sapo hp 
 import yts from 'yt-search'
 import axios from 'axios'
 import fs from 'fs'
+import fsp from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { pipeline } from 'stream/promises'
+import { randomUUID } from 'crypto'
 import {
   generateWAMessageFromContent,
   proto
 } from '@whiskeysockets/baileys'
 
+const SEP = '|~|'
 const DV_API_URL = process.env.DV_API_URL || 'https://dv-yer-api.online'
 const DV_API_KEY = process.env.DV_API_KEY || 'dvyerDravenFX4'
 const TMP_DIR = path.join(os.tmpdir(), 'denji-yt')
-const REQUEST_TIMEOUT = 120000
-const MAX_BYTES = 150 * 1024 * 1024
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36'
+const FILE_TIMEOUT = 150_000
+const MAX_BYTES = 500 * 1024 * 1024
+const MIN_BYTES = 10 * 1024
 
-function ensureTmpDir() {
-  try { fs.mkdirSync(TMP_DIR, { recursive: true }) } catch {}
+async function ensureTmpDir() {
+  await fsp.mkdir(TMP_DIR, { recursive: true })
 }
 ensureTmpDir()
 
-function deleteSafe(p) {
-  try { if (p && fs.existsSync(p)) fs.unlinkSync(p) } catch {}
-}
-
-const SEP = '|~|'
-
-const getVideoId = (text = '') => {
-  const match = text.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/|v\/))([a-zA-Z0-9_-]{11})/
-  )
-  return match?.[1] || null
+async function deleteSafe(p) {
+  try { if (p) await fsp.unlink(p) } catch {}
 }
 
 const isYTUrl = (url = '') => /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/i.test(url)
+
+const getVideoId = (text = '') => {
+  const m = text.match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/|v\/))([a-zA-Z0-9_-]{11})/
+  )
+  return m?.[1] || null
+}
 
 const sanitizeFileName = (name = 'archivo') =>
   name.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'archivo'
@@ -45,68 +47,124 @@ const buildYTUrl = (v) => {
   return null
 }
 
-async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
+async function dvGetLink(youtubeUrl, tipo = 'mp4', quality = '480p') {
   const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
-  const params = { url: youtubeUrl, apikey: DV_API_KEY }
+  const params = { url: youtubeUrl, apikey: DV_API_KEY, mode: 'link' }
   if (tipo === 'mp4') params.quality = quality
 
   const res = await axios.get(`${DV_API_URL}${endpoint}`, {
     params,
-    timeout: 60000,
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Accept': 'application/json',
-      'x-api-key': DV_API_KEY
-    },
+    timeout: 90_000,
+    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
     validateStatus: () => true
   })
 
-  const json = res.data
-  if (res.status >= 400 || json?.ok === false) {
-    throw new Error(json?.detail || json?.error || json?.message || `HTTP ${res.status}`)
+  const d = res.data
+  if (res.status >= 400 || d?.ok === false) {
+    throw new Error(d?.detail || d?.message || `HTTP ${res.status}`)
   }
-  return json
+
+  const remoteUrl =
+    d?.download_url_full || d?.stream_url_full ||
+    d?.download_url || d?.stream_url || d?.url || ''
+
+  if (!remoteUrl) throw new Error('La API no devolvió URL de descarga')
+
+  return {
+    remoteUrl,
+    title: d?.title || '',
+    fileName: d?.filename || '',
+    quality: d?.quality || quality
+  }
 }
 
-async function downloadToFile(streamUrl, outputPath) {
-  ensureTmpDir()
-  console.log('[DL URL]', streamUrl)
+async function downloadToFile(remoteUrl, ext) {
+  await ensureTmpDir()
+  const tempPath = path.join(TMP_DIR, `${Date.now()}-${randomUUID()}${ext}`)
 
-  const response = await axios.get(streamUrl, {
+  const res = await axios.get(remoteUrl, {
     responseType: 'stream',
-    timeout: REQUEST_TIMEOUT,
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Accept': '*/*',
-      'x-api-key': DV_API_KEY
-    },
-    validateStatus: () => true,
-    maxRedirects: 10
+    timeout: FILE_TIMEOUT,
+    headers: { 'User-Agent': UA, 'Accept': '*/*' },
+    maxRedirects: 5,
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    validateStatus: () => true
   })
 
-  if (response.status >= 400) {
-    throw new Error(`HTTP ${response.status} al descargar stream`)
-  }
+  if (res.status >= 400) throw new Error(`HTTP ${res.status} al descargar`)
 
   let downloaded = 0
-  response.data.on('data', (chunk) => {
+  res.data.on('data', (chunk) => {
     downloaded += chunk.length
-    if (downloaded > MAX_BYTES) {
-      response.data.destroy(new Error('Archivo demasiado grande'))
-    }
+    if (downloaded > MAX_BYTES) res.data.destroy(new Error('Archivo demasiado grande'))
   })
 
   try {
-    await pipeline(response.data, fs.createWriteStream(outputPath))
+    await pipeline(res.data, fs.createWriteStream(tempPath))
   } catch (e) {
-    deleteSafe(outputPath)
+    await deleteSafe(tempPath)
     throw e
   }
 
-  if (!fs.existsSync(outputPath)) throw new Error('No se guardó el archivo')
-  const size = fs.statSync(outputPath).size
-  if (size < 100) throw new Error('Archivo inválido o vacío')
-  return size
+  const stat = await fsp.stat(tempPath).catch(() => null)
+  if (!stat?.size || stat.size < MIN_BYTES) {
+    await deleteSafe(tempPath)
+    throw new Error('Archivo descargado inválido o vacío')
+  }
+
+  return tempPath
+}
+
+async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName }) {
+  const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
+  const safeName = sanitizeFileName(fileName || title) + ext
+  const cap = tipo === 'mp3'
+    ? `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${title}`
+    : `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${title}\n💀 Calidad: *${quality}*`
+
+  // Intento 1: enviar directo con URL remota
+  try {
+    if (tipo === 'mp3') {
+      await conn.sendMessage(m.chat, {
+        audio: { url: remoteUrl },
+        mimetype: 'audio/mpeg',
+        fileName: safeName
+      }, { quoted: m })
+    } else {
+      await conn.sendMessage(m.chat, {
+        video: { url: remoteUrl },
+        mimetype: 'video/mp4',
+        fileName: safeName,
+        caption: cap
+      }, { quoted: m })
+    }
+    return
+  } catch (e) {
+    console.log('[YT] URL directa falló, descargando local...', e.message)
+  }
+
+  let tempPath = null
+  try {
+    tempPath = await downloadToFile(remoteUrl, ext)
+
+    if (tipo === 'mp3') {
+      await conn.sendMessage(m.chat, {
+        audio: { url: tempPath },
+        mimetype: 'audio/mpeg',
+        fileName: safeName
+      }, { quoted: m })
+    } else {
+      await conn.sendMessage(m.chat, {
+        video: { url: tempPath },
+        mimetype: 'video/mp4',
+        fileName: safeName,
+        caption: cap
+      }, { quoted: m })
+    }
+  } finally {
+    deleteSafe(tempPath)
+  }
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
@@ -179,7 +237,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
 
   } catch (e) {
-    console.log(e)
+    console.log('[YT SEARCH ERROR]', e)
     await m.react('💀')
     conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error al buscar: ' + e.message }, { quoted: m })
   }
@@ -234,10 +292,10 @@ handler.before = async (m, { conn }) => {
 
     const payload = id.slice((fmt + SEP).length)
     const [urlB64, titleB64] = payload.split(SEP)
-    const ytUrl = Buffer.from(urlB64, 'base64url').toString()
+    const ytUrl  = Buffer.from(urlB64,   'base64url').toString()
     const titulo = Buffer.from(titleB64, 'base64url').toString()
 
-    const tipo = fmt === 'ytmp3' ? 'mp3' : 'mp4'
+    const tipo    = fmt === 'ytmp3' ? 'mp3' : 'mp4'
     const quality = fmt === 'ytmp4720' ? '720p' : '480p'
 
     await m.react('⚰️')
@@ -245,40 +303,17 @@ handler.before = async (m, { conn }) => {
       text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${tipo === 'mp3' ? 'audio' : 'video'}...\n💀 ${titulo}\n\n> Esto puede tardar un momento...`
     }, { quoted: m })
 
-    const result = await dvDownload(ytUrl, tipo, quality)
-    const streamUrl = result.download_url_full || result.stream_url_full || result.download_url || result.stream_url || result.url
-    console.log("[DV RESULT]", JSON.stringify(result, null, 2))
-    console.log("[STREAM URL]", streamUrl)
-    if (!streamUrl) throw new Error('La API no devolvió URL de descarga')
+    const result = await dvGetLink(ytUrl, tipo, quality)
 
-    const finalTitle = result.title || titulo
-    const finalFilename = sanitizeFileName(finalTitle)
-    const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
-    const tempPath = path.join(TMP_DIR, `${Date.now()}${ext}`)
+    await sendMedia(conn, m, {
+      tipo,
+      remoteUrl: result.remoteUrl,
+      title: result.title || titulo,
+      quality: result.quality,
+      fileName: result.fileName || titulo
+    })
 
-    try {
-      if (tipo === 'mp3') {
-        await conn.sendMessage(m.chat, {
-          audio: { url: streamUrl },
-          mimetype: 'audio/mpeg',
-          fileName: finalFilename + ext,
-          caption: `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || '128K'}*`
-        }, { quoted: m })
-      } else {
-        await conn.sendMessage(m.chat, {
-          video: { url: streamUrl },
-          fileName: finalFilename + ext,
-          mimetype: 'video/mp4',
-          caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
-        }, { quoted: m })
-      }
-
-      await m.react('🩸')
-
-    } finally {
-      deleteSafe(tempPath)
-    }
-
+    await m.react('🩸')
     return true
 
   } catch (e) {
