@@ -1,6 +1,6 @@
 //funcione sapo hp 
 import yts from 'yt-search'
-import fetch from 'node-fetch'
+import axios from 'axios'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -13,6 +13,8 @@ import {
 const DV_API_URL = process.env.DV_API_URL || 'https://dv-yer-api.online'
 const DV_API_KEY = process.env.DV_API_KEY || 'dvyerDravenFX4'
 const TMP_DIR = path.join(os.tmpdir(), 'denji-yt')
+const REQUEST_TIMEOUT = 120000
+const MAX_BYTES = 150 * 1024 * 1024
 
 function ensureTmpDir() {
   try { fs.mkdirSync(TMP_DIR, { recursive: true }) } catch {}
@@ -22,6 +24,8 @@ ensureTmpDir()
 function deleteSafe(p) {
   try { if (p && fs.existsSync(p)) fs.unlinkSync(p) } catch {}
 }
+
+const SEP = '|~|'
 
 const getVideoId = (text = '') => {
   const match = text.match(
@@ -43,30 +47,66 @@ const buildYTUrl = (v) => {
 
 async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
   const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
-  const params = new URLSearchParams({ url: youtubeUrl })
-  if (DV_API_KEY) params.set('apikey', DV_API_KEY)
-  if (tipo === 'mp4') params.set('quality', quality)
-  const res = await fetch(`${DV_API_URL}${endpoint}?${params}`)
-  const json = await res.json()
-  if (!json.ok) throw new Error(json.detail || json.error || json.message || 'API sin resultado')
+  const params = { url: youtubeUrl, apikey: DV_API_KEY }
+  if (tipo === 'mp4') params.quality = quality
+
+  const res = await axios.get(`${DV_API_URL}${endpoint}`, {
+    params,
+    timeout: 60000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Accept': 'application/json',
+      'x-api-key': DV_API_KEY
+    },
+    validateStatus: () => true
+  })
+
+  const json = res.data
+  if (res.status >= 400 || json?.ok === false) {
+    throw new Error(json?.detail || json?.error || json?.message || `HTTP ${res.status}`)
+  }
   return json
 }
 
 async function downloadToFile(streamUrl, outputPath) {
   ensureTmpDir()
-  const res = await fetch(streamUrl, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-    redirect: 'follow'
+
+  const response = await axios.get(streamUrl, {
+    responseType: 'stream',
+    timeout: REQUEST_TIMEOUT,
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Accept': '*/*',
+      'x-api-key': DV_API_KEY
+    },
+    validateStatus: () => true,
+    maxRedirects: 10
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status} al descargar stream`)
-  await pipeline(res.body, fs.createWriteStream(outputPath))
+
+  if (response.status >= 400) {
+    throw new Error(`HTTP ${response.status} al descargar stream`)
+  }
+
+  let downloaded = 0
+  response.data.on('data', (chunk) => {
+    downloaded += chunk.length
+    if (downloaded > MAX_BYTES) {
+      response.data.destroy(new Error('Archivo demasiado grande'))
+    }
+  })
+
+  try {
+    await pipeline(response.data, fs.createWriteStream(outputPath))
+  } catch (e) {
+    deleteSafe(outputPath)
+    throw e
+  }
+
   if (!fs.existsSync(outputPath)) throw new Error('No se guardó el archivo')
   const size = fs.statSync(outputPath).size
   if (size < 100) throw new Error('Archivo inválido o vacío')
   return size
 }
-
-const SEP = '|~|'
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   const input_text = text?.trim()
@@ -205,7 +245,9 @@ handler.before = async (m, { conn }) => {
     }, { quoted: m })
 
     const result = await dvDownload(ytUrl, tipo, quality)
-    const streamUrl = result.download_url || result.stream_url
+    const streamUrl = result.download_url_full || result.stream_url_full || result.download_url || result.stream_url || result.url
+    if (!streamUrl) throw new Error('La API no devolvió URL de descarga')
+
     const finalTitle = result.title || titulo
     const finalFilename = sanitizeFileName(finalTitle)
     const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
