@@ -1,404 +1,409 @@
-import yts from 'yt-search'
-import axios from 'axios'
+import fetch from 'node-fetch'
 import fs from 'fs'
-import fsp from 'fs/promises'
 import path from 'path'
-import os from 'os'
+import axios from 'axios'
 import { pipeline } from 'stream/promises'
-import { randomUUID } from 'crypto'
+import { spawn } from 'child_process'
 import {
   generateWAMessageFromContent,
+  prepareWAMessageMedia,
   proto
 } from '@whiskeysockets/baileys'
 
-const SEP = '|~|'
-const DELIRIUS_API = 'https://api.delirius.store/download'
-const TMP_DIR = path.join(os.tmpdir(), 'denji-yt')
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36'
-const FILE_TIMEOUT = 150_000
-const MAX_BYTES = 500 * 1024 * 1024
-const MIN_BYTES = 10 * 1024
+const TEMP_DIR = path.join(process.cwd(), 'tmp')
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true })
 
-async function ensureTmpDir() {
-  await fsp.mkdir(TMP_DIR, { recursive: true })
+const REQUEST_TIMEOUT = 120000
+const MAX_VIDEO_BYTES = 1500 * 1024 * 1024
+const VIDEO_AS_DOCUMENT_THRESHOLD = 70 * 1024 * 1024
+const DELIRIUS_API = 'https://api.delirius.store'
+const VIDEO_QUALITY = '360'  // sin "p" — ytmp4v2 lo requiere así
+
+const _processing = new Set()
+
+const FRASES_DENJI = [
+  '🩸 *"Oye... ya puedo respirar por fin..."*',
+  '🔪 *"Solo quiero comer pan con mermelada..."*',
+  '💀 *"No soy un humano ni un diablo... soy Chainsaw Man"*',
+  '🩸 *"Makima... haré lo que sea por ti..."*',
+  '⛓️ *"¡MOTOSIERRA!"*',
+  '🔪 *"Los sueños baratos... son los mejores"*',
+  '💀 *"Aki... Power... ya no están aquí..."*',
+  '🩸 *"Pochita me dio su corazón... no lo desperdiciaré"*',
+  '⛓️ *"¡Vrum vrum intensifies!"*',
+  '🔪 *"Ni siquiera recuerdo cuántos demonios he matado"*',
+  '💀 *"El Diablo de las Motosierras devora el miedo"*',
+  '🩸 *"...¿Esto es lo que se siente vivir?"*'
+]
+const frasesRandom = () => FRASES_DENJI[Math.floor(Math.random() * FRASES_DENJI.length)]
+
+const UI = {
+  header:       '⛓️ DENJI BOT ⛓️',
+  subHeader:    '🔪 YouTube — Chainsaw Style',
+  footer:       () => frasesRandom(),
+  ayuda:        (p, c) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n🩸 *Descarga música y videos de YouTube*\n\n🔪 Por nombre:\n> ${p}${c} Naruto Opening 1\n\n🔪 Por link:\n> ${p}${c} https://youtu.be/xxx\n\n💎 *Cuesta 1 diamante por descarga*\n\n💀 *"El Chainsaw Man descarga lo que sea..."*\n\n${frasesRandom()}`,
+  sinDiamantes: (d) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n💀 *Sin diamantes, humano*\n🔪 Necesitas: 1 | Tienes: ${d}\n\n🩸 *"Hasta yo necesito combustible..."*\n> Usa #work para ganar`,
+  buscando:     () => '⛓️ *DENJI BOT* ⛓️\n\n🔍 Buscando en YouTube...\n🩸 *"La motosierra huele el video..."*',
+  sinResultados:'⛓️ *DENJI BOT* ⛓️\n\n💀 No encontré nada...\n🔪 *"Ni los demonios conocen esa canción"*',
+  descargandoAudio: (titulo) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n🎵 Descargando audio...\n💀 *${titulo}*\n💎 -1 diamante\n\n🔪 *"Espera... la motosierra está calentando..."*`,
+  descargandoVideo: (titulo) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n🎬 Descargando video...\n💀 *${titulo}* (${VIDEO_QUALITY}p)\n💎 -1 diamante\n\n🔪 *"Espera... la motosierra está calentando..."*`,
+  listo: (tipo, titulo, restantes) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n✅ *Descarga lista, humano*\n\n${tipo === 'audio' ? '🎵' : '🎬'} ${titulo}\n💎 Diamantes restantes: ${restantes}\n\n${frasesRandom()}`,
+  error: (msg) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n💀 *Error*\n🔪 ${msg}\n\n🩸 *"Hasta Pochita fallaría esto..."*`,
+  errorDiamante: (msg) =>
+    `⛓️ *DENJI BOT* ⛓️\n\n💀 *Error*\n🔪 ${msg}\n\n💎 *Diamante devuelto*\n🩸 *"Ni modo..."*`,
+  linkInvalido:  '⛓️ *DENJI BOT* ⛓️\n\n💀 Ese link no es de YouTube, humano.\n🔪 *"¿Me estás tomando el pelo?"*'
 }
-ensureTmpDir()
 
-async function deleteSafe(p) {
-  try { if (p) await fsp.unlink(p) } catch {}
+function safeFileName(name) {
+  return String(name || 'media').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'media'
 }
-
-const isYTUrl = (url = '') => /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/i.test(url)
-
-const getVideoId = (text = '') => {
-  const m = text.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/|v\/))([a-zA-Z0-9_-]{11})/
-  )
-  return m?.[1] || null
+function isHttpUrl(v) { return /^https?:\/\//i.test(String(v || '')) }
+function extractYouTubeUrl(text) {
+  const m = String(text || '').match(/https?:\/\/(?:www\.)?(?:youtube\.com|music\.youtube\.com|youtu\.be)\/[^\s]+/i)
+  return m ? m[0].trim() : ''
 }
-
-const sanitizeFileName = (name = 'archivo') =>
-  name.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'archivo'
-
-const buildYTUrl = (v) => {
-  if (v.videoId) return `https://www.youtube.com/watch?v=${v.videoId}`
-  if (v.url && isYTUrl(v.url)) return v.url
-  return null
+function normalizeMp4Name(name) {
+  const clean = safeFileName(String(name || 'video').replace(/\.mp4$/i, ''))
+  return `${clean || 'video'}.mp4`
 }
-
-const stripP = (q = '') => q.replace(/p$/i, '')
-
-async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
-  let res, d
-
-  if (tipo === 'mp3') {
-    // /ytmp3 — no quality param needed
-    res = await axios.get(`${DELIRIUS_API}/ytmp3`, {
-      params: { url: youtubeUrl },
-      timeout: 90_000,
-      headers: { 'User-Agent': UA, Accept: 'application/json' },
-      validateStatus: () => true
-    })
-    d = res.data
-    console.log('[YT API mp3]', JSON.stringify(d))
-    if (!d?.status) throw new Error(d?.msg || `Error al obtener audio (HTTP ${res.status})`)
-    const remoteUrl = d?.data?.download || ''
-    if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp3)')
-    return {
-      remoteUrl,
-      title: d?.data?.title || '',
-      fileName: d?.data?.title || '',
-      quality: 'mp3'
-    }
-  }
-
-  const fmt = stripP(quality)
-  res = await axios.get(`${DELIRIUS_API}/ytmp4v2`, {
-    params: { url: youtubeUrl, format: fmt },
-    timeout: 90_000,
-    headers: { 'User-Agent': UA, Accept: 'application/json' },
-    validateStatus: () => true
+function deleteFileSafe(fp) {
+  try { if (fp && fs.existsSync(fp)) fs.unlinkSync(fp) } catch {}
+}
+function parseContentDisposition(h) {
+  const t = String(h || '')
+  const u = t.match(/filename\*=UTF-8''([^;]+)/i)
+  if (u?.[1]) { try { return decodeURIComponent(u[1]).replace(/["']/g, '').trim() } catch {} }
+  const n = t.match(/filename="?([^"]+)"?/i)
+  return n?.[1]?.trim() || ''
+}
+async function readStreamToText(stream) {
+  return new Promise((res, rej) => {
+    let d = ''
+    stream.on('data', c => (d += c.toString()))
+    stream.on('end', () => res(d))
+    stream.on('error', rej)
   })
-  d = res.data
-  // API sometimes returns a plain string error instead of JSON
-  if (typeof d === 'string' || !d?.status) {
-    const reason = typeof d === 'string' ? d.slice(0, 120) : (d?.msg || 'Sin URL')
-    throw new Error(reason)
-  }
-  const remoteUrl = d?.data?.download || ''
-  if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp4)')
-  return {
-    remoteUrl,
-    title: d?.data?.title || '',
-    fileName: d?.data?.title || '',
-    quality: d?.data?.format || fmt
-  }
 }
 
-async function downloadToFile(remoteUrl, ext) {
-  await ensureTmpDir()
-  const tempPath = path.join(TMP_DIR, `${Date.now()}-${randomUUID()}${ext}`)
+function getDiamantes(user) { return user?.diamantes ?? user?.diamond ?? 0 }
+function restarDiamante(user) {
+  if (user.diamantes !== undefined) user.diamantes = (user.diamantes || 0) - 1
+  else user.diamond = (user.diamond || 0) - 1
+}
+function devolverDiamante(user, anterior) {
+  if (user.diamantes !== undefined) user.diamantes = anterior
+  else user.diamond = anterior
+}
 
-  const res = await axios.get(remoteUrl, {
-    responseType: 'stream',
-    timeout: FILE_TIMEOUT,
-    headers: {
-      'User-Agent': UA,
-      'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.5',
-      'Accept-Language': 'es-ES,es;q=0.9',
-      'Accept-Encoding': 'identity'
-    },
-    maxRedirects: 5,
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-    validateStatus: () => true
+async function downloadVideo(downloadUrl, outputPath) {
+  const response = await axios.get(downloadUrl, {
+    responseType: 'stream', timeout: REQUEST_TIMEOUT,
+    headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' },
+    validateStatus: () => true, maxRedirects: 10,
   })
-
-  if (res.status >= 400) throw new Error(`HTTP ${res.status} al descargar`)
-
+  if (response.status >= 400) {
+    const err = await readStreamToText(response.data).catch(() => '')
+    throw new Error(err || 'Error al descargar el video')
+  }
   let downloaded = 0
-  res.data.on('data', (chunk) => {
+  response.data.on('data', chunk => {
     downloaded += chunk.length
-    if (downloaded > MAX_BYTES) res.data.destroy(new Error('Archivo demasiado grande'))
+    if (downloaded > MAX_VIDEO_BYTES) response.data.destroy(new Error('Video demasiado grande'))
   })
-
-  try {
-    await pipeline(res.data, fs.createWriteStream(tempPath))
-  } catch (e) {
-    await deleteSafe(tempPath)
-    throw e
-  }
-
-  const stat = await fsp.stat(tempPath).catch(() => null)
-  if (!stat?.size || stat.size < MIN_BYTES) {
-    await deleteSafe(tempPath)
-    throw new Error('Archivo descargado inválido o vacío')
-  }
-
-  return tempPath
+  try { await pipeline(response.data, fs.createWriteStream(outputPath)) }
+  catch (e) { deleteFileSafe(outputPath); throw e }
+  if (!fs.existsSync(outputPath)) throw new Error('No se pudo guardar el video')
+  const size = fs.statSync(outputPath).size
+  if (!size || size < 150000) { deleteFileSafe(outputPath); throw new Error('Video inválido o vacío') }
+  const fromHeader = parseContentDisposition(response.headers?.['content-disposition'])
+  return { size, fileName: normalizeMp4Name(fromHeader || 'video.mp4') }
 }
 
-async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName }) {
-  const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
-  const safeName = sanitizeFileName(fileName || title) + ext
-  const cap = tipo === 'mp3'
-    ? `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${title}`
-    : `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${title}\n💀 Calidad: *${quality}p*`
+async function normalizeForWhatsApp(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath,
+      '-vf', 'scale=640:trunc(ow/a/2)*2',
+      '-c:v', 'libx264', '-b:v', '800k', '-preset', 'fast',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart', '-loglevel', 'error',
+      outputPath
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    ff.on('error', reject)
+    ff.on('close', code => { if (code === 0) resolve(true); else reject(new Error('ffmpeg error')) })
+  })
+}
 
+async function sendAudio(conn, m, videoUrl, title) {
+  const res = await fetch(`${DELIRIUS_API}/download/ytmp3?url=${encodeURIComponent(videoUrl)}`)
+  const json = await res.json()
+  if (!json.status || !json.data?.download) throw new Error('No se pudo obtener el audio.')
+  const finalTitle = safeFileName(json.data.title || title)
   try {
-    if (tipo === 'mp3') {
-      await conn.sendMessage(m.chat, {
-        audio: { url: remoteUrl },
-        mimetype: 'audio/mpeg',
-        fileName: safeName
-      }, { quoted: m })
-    } else {
-      await conn.sendMessage(m.chat, {
-        video: { url: remoteUrl },
-        mimetype: 'video/mp4',
-        fileName: safeName,
-        caption: cap
-      }, { quoted: m })
-    }
-    return
-  } catch (e) {
-    console.log('[YT] URL directa falló, descargando local...', e.message)
+    await conn.sendMessage(m.chat, {
+      audio: { url: json.data.download }, mimetype: 'audio/mpeg', fileName: finalTitle + '.mp3'
+    }, { quoted: m })
+  } catch {
+    await conn.sendMessage(m.chat, {
+      document: { url: json.data.download }, mimetype: 'audio/mpeg', fileName: finalTitle + '.mp3'
+    }, { quoted: m })
   }
+  if (json.data.image) {
+    await conn.sendMessage(m.chat, {
+      image: { url: json.data.image },
+      caption: `⛓️ *DENJI BOT* ⛓️\n\n🎵 *${finalTitle}*\n👤 ${json.data.author || ''}\n\n${frasesRandom()}`
+    }, { quoted: m })
+  }
+  return finalTitle
+}
 
-  let tempPath = null
+async function sendVideo(conn, m, videoUrl, title) {
+  // Intentar calidades en cascada
+  const calidades = [VIDEO_QUALITY, '240', '144']
+  let json = null
+  for (const q of calidades) {
+    const res = await fetch(`${DELIRIUS_API}/download/ytmp4v2?url=${encodeURIComponent(videoUrl)}&format=${q}`)
+    const data = await res.json()
+    if (data.status && data.data?.download) { json = data; break }
+    console.log(`[YT] ${q}p falló:`, data.msg || 'sin URL')
+  }
+  if (!json) throw new Error('No se pudo obtener el video en ninguna calidad.')
+
+  const finalTitle = safeFileName(json.data.title || title)
+  const rawFile    = path.join(TEMP_DIR, `yt_${Date.now()}.mp4`)
+  const finalFile  = path.join(TEMP_DIR, `yt_final_${Date.now()}.mp4`)
   try {
-    tempPath = await downloadToFile(remoteUrl, ext)
-    if (tipo === 'mp3') {
+    const videoInfo = await downloadVideo(json.data.download, rawFile)
+    const finalName = normalizeMp4Name(videoInfo.fileName || finalTitle)
+    if (videoInfo.size > VIDEO_AS_DOCUMENT_THRESHOLD) {
       await conn.sendMessage(m.chat, {
-        audio: { url: tempPath },
-        mimetype: 'audio/mpeg',
-        fileName: safeName
+        document: fs.readFileSync(rawFile), mimetype: 'video/mp4',
+        fileName: finalName,
+        caption: `⛓️ *DENJI BOT* ⛓️\n\n🎬 *${finalTitle}*\n\n${frasesRandom()}`
       }, { quoted: m })
     } else {
-      await conn.sendMessage(m.chat, {
-        video: { url: tempPath },
-        mimetype: 'video/mp4',
-        fileName: safeName,
-        caption: cap
-      }, { quoted: m })
+      try {
+        await conn.sendMessage(m.chat, {
+          video: fs.readFileSync(rawFile), mimetype: 'video/mp4',
+          fileName: finalName,
+          caption: `⛓️ *DENJI BOT* ⛓️\n\n🎬 *${finalTitle}*\n\n${frasesRandom()}`
+        }, { quoted: m })
+      } catch {
+        await normalizeForWhatsApp(rawFile, finalFile)
+        const filePath = fs.existsSync(finalFile) ? finalFile : rawFile
+        await conn.sendMessage(m.chat, {
+          video: fs.readFileSync(filePath), mimetype: 'video/mp4',
+          fileName: finalName,
+          caption: `⛓️ *DENJI BOT* ⛓️\n\n🎬 *${finalTitle}*\n\n${frasesRandom()}`
+        }, { quoted: m })
+      }
     }
   } finally {
-    deleteSafe(tempPath)
+    deleteFileSafe(rawFile)
+    deleteFileSafe(finalFile)
   }
+  return finalTitle
 }
 
-
-async function cobaltGetLink(youtubeUrl, quality = '360') {
-  const q = String(quality).replace(/p$/i, '')
-  const res = await axios.post('https://api.cobalt.tools/', {
-    url: youtubeUrl,
-    videoQuality: q,
-    filenameStyle: 'basic',
-    downloadMode: 'auto'
-  }, {
-    timeout: 60_000,
-    headers: {
-      'User-Agent': UA,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    },
-    validateStatus: () => true
-  })
-  const d = res.data
-  if (!d?.url) throw new Error(d?.error?.code || d?.text || 'Cobalt sin URL')
-  return {
-    remoteUrl: d.url,
-    title: '',
-    fileName: '',
-    quality: q
+async function _mostrarSelectorFormato(conn, m, urlB64, titleB64, title, thumbnail) {
+  let media = null
+  if (thumbnail) {
+    try { media = await prepareWAMessageMedia({ image: { url: thumbnail } }, { upload: conn.waUploadToServer }) } catch {}
   }
+  const interactiveMessage = proto.Message.InteractiveMessage.create({
+    header: { title: UI.header, subtitle: String(title || '').slice(0, 60), hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+    body: { text: `⛓️ *DENJI BOT* ⛓️\n\n🩸 *${String(title || '').slice(0, 60)}*\n\n🔪 ¿Cómo lo quieres, humano?\n💎 1 diamante\n\n${frasesRandom()}` },
+    footer: { text: frasesRandom() },
+    nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '⛓️ FORMATO', sections: [{ title: '🩸 ELIGE TU ARMA', rows: [
+      { header: '🎵 AUDIO',    title: 'MP3 — 128kbps',     description: '🔪 Solo audio, sin video | 💎 1 diamante', id: `ytdl~audio~${urlB64}~${titleB64}` },
+      { header: '🎬 VIDEO SD', title: `MP4 — ${VIDEO_QUALITY}p`, description: `💀 Calidad estándar | 💎 1 diamante`,  id: `ytdl~video~${urlB64}~${titleB64}` }
+    ] }] }) }] }
+  })
+  const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
+  await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
-  const input_text = text?.trim()
+  const msgKey = `main_${m.id || m.key?.id}`
+  if (_processing.has(msgKey)) return
+  _processing.add(msgKey)
+  setTimeout(() => _processing.delete(msgKey), 15000)
 
-  if (!input_text) {
-    return conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n🔪 Descarga música y videos de YouTube\n\n💀 Por nombre:\n> ${usedPrefix}${command} Naruto Opening 1\n\n💀 Por link:\n> ${usedPrefix}${command} https://youtu.be/xxx`
-    }, { quoted: m })
+  let user = global.db.data.users[m.sender]
+  if (!user) { global.db.data.users[m.sender] = { diamantes: 0, diamond: 0 }; user = global.db.data.users[m.sender] }
+
+  const input = text?.trim()
+
+  if (!input) {
+    let media = null
+    try { media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/r60c8l.jpg' } }, { upload: conn.waUploadToServer }) } catch {}
+
+    const interactiveMessage = proto.Message.InteractiveMessage.create({
+      header: { title: UI.header, subtitle: UI.subHeader, hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+      body: { text: UI.ayuda(usedPrefix, command) },
+      footer: { text: frasesRandom() },
+      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🩸 YOUTUBE', sections: [{ title: '🔪 ¿Qué deseas?', rows: [{ header: '🔍 BUSCAR', title: 'Buscar música o video', description: '💀 Escribe el nombre después del comando', id: 'ytinfo' }] }] }) }] }
+    })
+    const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
+    return conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
+  }
+
+  if (isHttpUrl(input) && !extractYouTubeUrl(input)) {
+    return conn.sendMessage(m.chat, { text: UI.linkInvalido }, { quoted: m })
+  }
+
+  const diamantes = getDiamantes(user)
+  if (diamantes < 1) {
+    return conn.sendMessage(m.chat, { text: UI.sinDiamantes(diamantes) }, { quoted: m })
   }
 
   await m.react('🩸')
 
+  if (extractYouTubeUrl(input)) {
+    const videoUrl = extractYouTubeUrl(input)
+    const urlB64   = Buffer.from(videoUrl).toString('base64')
+    const titleB64 = Buffer.from('video').toString('base64')
+    return _mostrarSelectorFormato(conn, m, urlB64, titleB64, 'video', null)
+  }
+
   try {
-    const video_id = getVideoId(input_text)
-    let results = []
+    const res = await fetch(`${DELIRIUS_API}/search/ytsearch?q=${encodeURIComponent(input)}`)
+    const data = await res.json()
+    if (!data.status || !data.data?.length) throw new Error('No se encontraron resultados')
 
-    if (video_id) {
-      try {
-        const info = await yts({ videoId: video_id })
-        if (info?.videoId) results = [info]
-      } catch {}
+    const resultados = data.data.slice(0, 10)
+    let media = null
+    if (resultados[0]?.thumbnail) {
+      try { media = await prepareWAMessageMedia({ image: { url: resultados[0].thumbnail } }, { upload: conn.waUploadToServer }) } catch {}
     }
 
-    if (!results.length) {
-      const search = await yts(input_text)
-      results = (search.videos || []).slice(0, 8)
-    }
-
-    const validos = results.filter(v => buildYTUrl(v))
-
-    if (!validos.length) {
-      await m.react('💀')
-      return conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 No se encontraron resultados' }, { quoted: m })
-    }
-
-    const rows = validos.map((v) => {
-      const ytUrl = buildYTUrl(v)
-      const titulo = (v.title || '').substring(0, 50)
-      const payload = Buffer.from(ytUrl).toString('base64url') + SEP + Buffer.from(titulo).toString('base64url')
-      return {
-        header: '🎬 ' + (v.timestamp || '?'),
-        title: (v.title || 'Sin título').substring(0, 35),
-        description: '💀 ' + (v.author?.name || v.author || 'Desconocido') + ' | 👁️ ' + (v.views || 0).toLocaleString(),
-        id: 'ytdv' + SEP + payload
-      }
-    })
+    const rows = resultados.map((v) => ({
+      header: String(v.author?.name || 'Desconocido').slice(0, 20),
+      title: String(v.title || '').slice(0, 35),
+      description: `⏱️ ${v.duration || '?'} | 👁️ ${Number(v.views || 0).toLocaleString()}`,
+      id: `ytsel~${Buffer.from(v.url).toString('base64')}~${Buffer.from(String(v.title || 'video')).toString('base64')}`
+    }))
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: 'DENJI BOT - YOUTUBE', subtitle: 'Selecciona un video', hasMediaAttachment: false },
-      body: { text: `🩸 DENJI BOT 🩸\n\n🔪 Búsqueda: ${input_text}\n💀 ${validos.length} resultados\n\n> Elige uno` },
-      footer: { text: '🩸 DENJI BOT 🩸' },
-      nativeFlowMessage: {
-        buttons: [{
-          name: 'single_select',
-          buttonParamsJson: JSON.stringify({
-            title: '🎬 RESULTADOS',
-            sections: [{ title: '📋 ' + input_text.toUpperCase().substring(0, 24), rows }]
-          })
-        }]
-      }
+      header: { title: UI.header, subtitle: `🔍 ${input}`, hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+      body: { text: `⛓️ *DENJI BOT* ⛓️\n\n🩸 Búsqueda: *${input}*\n🔪 ${resultados.length} resultados\n\n> Elige uno, el Chainsaw Man te espera...\n💎 1 diamante` },
+      footer: { text: frasesRandom() },
+      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🩸 RESULTADOS', sections: [{ title: `🔪 ${input.toUpperCase().slice(0, 24)}`, rows }] }) }] }
     })
-
-    const msg = generateWAMessageFromContent(m.chat, {
-      viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } }
-    }, { quoted: m })
-
+    const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
     await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
-
+    await m.react('⛓️')
   } catch (e) {
-    console.log('[YT SEARCH ERROR]', e)
     await m.react('💀')
-    conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error al buscar: ' + e.message }, { quoted: m })
+    conn.sendMessage(m.chat, { text: UI.error(e.message) }, { quoted: m })
   }
 }
 
 handler.before = async (m, { conn }) => {
+  if (m.isBaileys) return false
+
   const nativeFlow = m.message?.interactiveResponseMessage?.nativeFlowResponseMessage
   if (!nativeFlow) return false
 
+  const msgKey = `before_${m.id || m.key?.id}`
+  if (_processing.has(msgKey)) return true
+  _processing.add(msgKey)
+  setTimeout(() => _processing.delete(msgKey), 30000)
+
+  let id
   try {
     const data = JSON.parse(nativeFlow.paramsJson || '{}')
-    const id = data.id || data.selectedId || data.selectedRowId || null
+    id = data.id || data.selectedId || data.selectedRowId || null
+  } catch { return false }
 
-    if (id?.startsWith('ytdv' + SEP)) {
-      const payload = id.slice(('ytdv' + SEP).length)
-      const [urlB64, titleB64] = payload.split(SEP)
-      const titulo = Buffer.from(titleB64, 'base64url').toString()
+  if (!id) return false
 
-      const interactiveMessage = proto.Message.InteractiveMessage.create({
-        header: { title: 'DENJI BOT - YOUTUBE', subtitle: '¿Cómo lo quieres?', hasMediaAttachment: false },
-        body: { text: `🩸 DENJI BOT 🩸\n\n🔪 ${titulo || 'Video seleccionado'}\n\n💀 ¿Audio o Video?` },
-        footer: { text: '🩸 DENJI BOT 🩸' },
-        nativeFlowMessage: {
-          buttons: [{
-            name: 'single_select',
-            buttonParamsJson: JSON.stringify({
-              title: '⬇️ FORMATO',
-              sections: [{
-                title: '💀 ELIGE EL FORMATO',
-                rows: [
-                  { header: '🎵 AUDIO',    title: 'MP3 - 128K', description: '🔪 Solo audio',      id: 'ytmp3'    + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO SD', title: 'MP4 - 360p', description: '💀 Video estándar',  id: 'ytmp4360' + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO HD', title: 'MP4 - 480p', description: '🩸 Video HD',        id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO FHD',title: 'MP4 - 720p', description: '🩸 Video Full HD',   id: 'ytmp4720' + SEP + urlB64 + SEP + titleB64 }
-                ]
-              }]
-            })
-          }]
-        }
-      })
+  if (id === 'ytinfo') {
+    await conn.sendMessage(m.chat, {
+      text: `⛓️ *DENJI BOT* ⛓️\n\n🔪 Escribe así:\n> .yt Naruto Opening 1\n\n🩸 *"La motosierra huele el video..."*`
+    }, { quoted: m })
+    return true
+  }
 
-      const msg = generateWAMessageFromContent(m.chat, {
-        viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } }
-      }, { quoted: m })
+  if (id.startsWith('ytsel~')) {
+    const parts = id.split('~')
+    if (parts.length < 3) return true
+    const urlB64   = parts[1]
+    const titleB64 = parts[2]
+    let title = 'video'
+    try { title = Buffer.from(titleB64, 'base64').toString() } catch {}
+    await _mostrarSelectorFormato(conn, m, urlB64, titleB64, title, null)
+    return true
+  }
 
-      await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
+  if (id.startsWith('ytdl~')) {
+    const parts = id.split('~')
+    if (parts.length < 4) {
+      await conn.sendMessage(m.chat, { text: UI.error('Error al procesar la selección.') }, { quoted: m })
+      return true
+    }
+    const tipo     = parts[1]
+    const urlB64   = parts[2]
+    const titleB64 = parts[3]
+
+    let videoUrl, title
+    try {
+      videoUrl = Buffer.from(urlB64, 'base64').toString()
+      title    = Buffer.from(titleB64, 'base64').toString()
+    } catch {
+      await conn.sendMessage(m.chat, { text: UI.error('Error al procesar la selección.') }, { quoted: m })
       return true
     }
 
-    const formatos = ['ytmp3', 'ytmp4360', 'ytmp4480', 'ytmp4720']
-    const fmt = formatos.find(f => id?.startsWith(f + SEP))
-    if (!fmt) return false
+    let user = global.db.data.users[m.sender]
+    if (!user) { global.db.data.users[m.sender] = { diamantes: 0, diamond: 0 }; user = global.db.data.users[m.sender] }
 
-    const payload = id.slice((fmt + SEP).length)
-    const [urlB64, titleB64] = payload.split(SEP)
-    const ytUrl  = Buffer.from(urlB64,   'base64url').toString()
-    const titulo = Buffer.from(titleB64, 'base64url').toString()
-
-    const tipo    = fmt === 'ytmp3' ? 'mp3' : 'mp4'
-    const quality = fmt === 'ytmp4720' ? '720p'
-                  : fmt === 'ytmp4480' ? '480p'
-                  : '360p'
-
-    await m.react('⚰️')
-    await conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${tipo === 'mp3' ? 'audio' : 'video'}...\n💀 ${titulo}\n\n> Esto puede tardar un momento...`
-    }, { quoted: m })
-
-    let result
-    if (tipo === 'mp4') {
-
-      const fallbacks = ['720p', '480p', '360p', '240p']
-      const startIdx = Math.max(fallbacks.indexOf(quality), 0)
-      const chain = fallbacks.slice(startIdx)
-      let lastErr
-      for (const q of chain) {
-        try {
-          result = await deliriusGetLink(ytUrl, 'mp4', q)
-          break
-        } catch (e) {
-          lastErr = e
-          const next = chain[chain.indexOf(q) + 1]
-          console.log('[YT]', q, 'falló:', e.message, next ? '→ probando ' + next : '→ sin más opciones')
-        }
-      }
-      if (!result) {
-        console.log('[YT] Delirius agotado, intentando Cobalt...')
-        const qNum = quality.replace(/p$/i, '')
-        result = await cobaltGetLink(ytUrl, qNum)
-      }
-    } else {
-      result = await deliriusGetLink(ytUrl, 'mp3')
+    const diamantes = getDiamantes(user)
+    if (diamantes < 1) {
+      await conn.sendMessage(m.chat, { text: UI.sinDiamantes(diamantes) }, { quoted: m })
+      return true
     }
 
-    await sendMedia(conn, m, {
-      tipo,
-      remoteUrl: result.remoteUrl,
-      title: result.title || titulo,
-      quality: result.quality,
-      fileName: result.fileName || titulo
-    })
+    restarDiamante(user)
+    const restantes = getDiamantes(user)
 
-    await m.react('🩸')
-    return true
+    await m.react('⛓️')
+    await conn.sendMessage(m.chat, {
+      text: tipo === 'audio' ? UI.descargandoAudio(title) : UI.descargandoVideo(title)
+    }, { quoted: m })
 
-  } catch (e) {
-    console.log('[YT ERROR]', e.message)
-    await m.react('💀')
-    conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message }, { quoted: m })
+    try {
+      let finalTitle
+      if (tipo === 'audio') finalTitle = await sendAudio(conn, m, videoUrl, title)
+      else finalTitle = await sendVideo(conn, m, videoUrl, title)
+
+      await conn.sendMessage(m.chat, { text: UI.listo(tipo, finalTitle || title, restantes) }, { quoted: m })
+      await m.react('🩸')
+    } catch (e) {
+      devolverDiamante(user, diamantes)
+      console.error('[YT ERROR]', e.message)
+      await m.react('💀')
+      const rawMsg = String(e?.message || '').toLowerCase()
+      const humanMsg = (rawMsg.includes('502') || rawMsg.includes('503') || rawMsg.includes('bad gateway'))
+        ? UI.errorDiamante('El servidor está saturado, intenta más tarde.')
+        : UI.errorDiamante(e.message || 'Error al descargar.')
+      await conn.sendMessage(m.chat, { text: humanMsg }, { quoted: m })
+    }
     return true
   }
+
+  return false
 }
 
-handler.help = ['play']
-handler.tags = ['downloader']
-handler.command = /^(play|yt|youtube)$/i
-handler.desc = 'Busca y descarga música y videos de YouTube'
+handler.help    = ['yt', 'play', 'video']
+handler.tags    = ['downloader']
+handler.command = /^(yt|ytmp3|ytmp4|video|mp3|song|play|musica|cancion|youtube)$/i
+handler.desc    = '⛓️ Descarga audio o video de YouTube — Chainsaw Man style 💎1'
 
 export default handler
