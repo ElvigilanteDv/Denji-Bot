@@ -5,7 +5,7 @@ const settingsDir = path.resolve('./json')
 const settingsPath = path.join(settingsDir, 'settings.json')
 
 const ownerNumbers = [
-  '5028444966582',
+  '5218444966582',
   '573223090406'
 ]
 
