@@ -4,10 +4,23 @@ import path from 'path'
 const settingsDir = path.resolve('./json')
 const settingsPath = path.join(settingsDir, 'settings.json')
 
+const ownerNumbers = [
+  '528444966582',
+  '573223090406'
+]
+
+function getOwners() {
+  return ownerNumbers.map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net')
+}
+
+function isOwnerUser(jid = '') {
+  return getOwners().includes(jid)
+}
+
 function ensureSettingsFile() {
   if (!fs.existsSync(settingsDir)) fs.mkdirSync(settingsDir, { recursive: true })
   if (!fs.existsSync(settingsPath)) {
-    fs.writeFileSync(settingsPath, JSON.stringify({}, null, 2))
+    fs.writeFileSync(settingsPath, JSON.stringify({}, null, 2), 'utf8')
   }
 }
 
@@ -22,7 +35,19 @@ function readSettings() {
 
 function saveSettings(data) {
   ensureSettingsFile()
-  fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2))
+  fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2), 'utf8')
+}
+
+function getDefaultConfig() {
+  return {
+    antilink: false,
+    antilinkMode: 'delete',
+    antilinkWarnLimit: 3,
+    antilinkWarnings: {},
+    welcome: false,
+    antiarabe: false,
+    modoadmin: false
+  }
 }
 
 function getChatConfig(botNumber, chatId) {
@@ -30,15 +55,7 @@ function getChatConfig(botNumber, chatId) {
 
   if (!settings[botNumber]) settings[botNumber] = {}
   if (!settings[botNumber][chatId]) {
-    settings[botNumber][chatId] = {
-      antilink: false,
-      antilinkMode: 'delete',
-      antilinkWarnLimit: 3,
-      antilinkWarnings: {},
-      welcome: false,
-      antiarabe: false,
-      modoadmin: false
-    }
+    settings[botNumber][chatId] = getDefaultConfig()
     saveSettings(settings)
   }
 
@@ -50,15 +67,7 @@ function addWarning(botNumber, chatId, user) {
 
   if (!settings[botNumber]) settings[botNumber] = {}
   if (!settings[botNumber][chatId]) {
-    settings[botNumber][chatId] = {
-      antilink: false,
-      antilinkMode: 'delete',
-      antilinkWarnLimit: 3,
-      antilinkWarnings: {},
-      welcome: false,
-      antiarabe: false,
-      modoadmin: false
-    }
+    settings[botNumber][chatId] = getDefaultConfig()
   }
 
   if (!settings[botNumber][chatId].antilinkWarnings) {
@@ -101,6 +110,9 @@ handler.before = async (m, { conn }) => {
 
   if (!chat.antilink) return
 
+  if (m.fromMe) return
+  if (isOwnerUser(m.sender)) return
+
   const text = m.text || ''
   if (!text) return
 
@@ -108,7 +120,7 @@ handler.before = async (m, { conn }) => {
   const participants = groupMetadata.participants
   const userIsAdmin = isAdmin(participants, m.sender)
 
-  if (userIsAdmin || m.fromMe) return
+  if (userIsAdmin) return
 
   const links = detectLinks(text)
   if (!links.length) return
@@ -136,7 +148,9 @@ handler.before = async (m, { conn }) => {
 
 🔪 *LINK ELIMINADO* 🔪
 🩸 @${m.sender.split('@')[0]}, tu mensaje fue despedazado.
-☠️ En este grupo los links no sobreviven.`,
+☠️ En este grupo los links no sobreviven.
+
+> El demonio ya olió tu rastro.`,
       mentions: [m.sender]
     }, { quoted: m })
 
@@ -154,7 +168,9 @@ handler.before = async (m, { conn }) => {
 ☠️ *CASTIGO FINAL* ☠️
 🩸 @${m.sender.split('@')[0]} alcanzó *${warns}/${limit}* advertencias.
 🔪 El matadero ha dictado sentencia.
-🪦 Será expulsado por insistir con links prohibidos.`,
+🪦 Será expulsado por insistir con links prohibidos.
+
+> Tres heridas. Ninguna misericordia.`,
       mentions: [m.sender]
     }, { quoted: m })
 
@@ -170,7 +186,9 @@ handler.before = async (m, { conn }) => {
 🩸 *ADVERTENCIA ANTI-LINK* 🩸
 🔪 @${m.sender.split('@')[0]} dejó un rastro prohibido.
 ☠️ Marca actual: *${warns}/${limit}*
-> A la tercera falta, caerá del grupo.`,
+🪓 A la tercera falta, caerá del grupo.
+
+> La sangre ya fue marcada.`,
     mentions: [m.sender]
   }, { quoted: m })
 
