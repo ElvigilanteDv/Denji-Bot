@@ -27,11 +27,21 @@ const buildYTUrl = (v) => {
 }
 
 async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
+  console.log('[DVYER] URL recibida:', JSON.stringify(youtubeUrl))
+  console.log('[DVYER] Tipo:', tipo, '| Quality:', quality)
+  console.log('[DVYER] DV_API_URL:', DV_API_URL)
+  console.log('[DVYER] DV_API_KEY:', DV_API_KEY ? 'OK' : 'UNDEFINED')
+
   const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
   const params = new URLSearchParams({ url: youtubeUrl, key: DV_API_KEY })
   if (tipo === 'mp4') params.set('quality', quality)
-  const res = await fetch(`${DV_API_URL}${endpoint}?${params}`)
+
+  const fullUrl = `${DV_API_URL}${endpoint}?${params}`
+  console.log('[DVYER] Request URL completa:', fullUrl)
+
+  const res = await fetch(fullUrl)
   const json = await res.json()
+  console.log('[DVYER] Respuesta:', JSON.stringify(json))
   if (!json.ok) throw new Error(json.error || json.message || 'API sin resultado')
   return json
 }
@@ -77,7 +87,6 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     const rows = validos.map((v, i) => {
       const ytUrl = buildYTUrl(v)
       const titulo = (v.title || '').substring(0, 50)
-      // Padre nuestro, que estás en el cielo,santificado sea tu nombre;venga a nosotros tu reino;hágase tu voluntad en la tierra como en el cielo.Danos hoy nuestro pan de cada día;perdona nuestras ofensas,como también nosotros perdonamos a los que nos ofenden;no nos dejes caer en la tentación,y líbranos del mal.Amén
       const payload = Buffer.from(ytUrl).toString('base64url') + SEP + Buffer.from(titulo).toString('base64url')
       return {
         header: '🎬 ' + (v.timestamp || '?'),
@@ -129,7 +138,8 @@ handler.before = async (m, { conn }) => {
       const ytUrl = Buffer.from(urlB64, 'base64url').toString()
       const titulo = Buffer.from(titleB64, 'base64url').toString()
 
-      console.log('[YT] URL decodificada:', ytUrl) // debug
+      console.log('[YT PASO2] URL decodificada:', ytUrl)
+      console.log('[YT PASO2] Título:', titulo)
 
       const interactiveMessage = proto.Message.InteractiveMessage.create({
         header: { title: 'DENJI BOT - YOUTUBE', subtitle: '¿Cómo lo quieres?', hasMediaAttachment: false },
@@ -185,7 +195,9 @@ handler.before = async (m, { conn }) => {
     const ytUrl = Buffer.from(urlB64, 'base64url').toString()
     const titulo = Buffer.from(titleB64, 'base64url').toString()
 
-    console.log('[YT] Descargando URL:', ytUrl) // debug
+    console.log('[YT PASO3] fmt:', fmt)
+    console.log('[YT PASO3] URL decodificada:', ytUrl)
+    console.log('[YT PASO3] Título:', titulo)
 
     const tipo = fmt === 'ytmp3' ? 'mp3' : 'mp4'
     const quality = fmt === 'ytmp4720' ? '720p' : '480p'
@@ -220,7 +232,7 @@ handler.before = async (m, { conn }) => {
     return true
 
   } catch (e) {
-    console.log(e)
+    console.log('[YT ERROR]', e)
     await m.react('💀')
     conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message }, { quoted: m })
     return true
