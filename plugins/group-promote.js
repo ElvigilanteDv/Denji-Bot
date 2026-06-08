@@ -36,7 +36,9 @@ let handler = async (m, { conn, isAdmin, isBotAdmin }) => {
     ].join('\n')
   }, { quoted: m })
 
-  let who = m.mentionedJid && m.mentionedJid[0] ? m.mentionedJid[0] : m.quoted ? m.quoted.sender : null
+  // Si es owner y no menciona a nadie, se da admin a sí mismo
+  let who = m.mentionedJid && m.mentionedJid[0] ? m.mentionedJid[0] : m.quoted ? m.quoted.sender : isOwner ? m.sender : null
+
   if (!who) return conn.sendMessage(m.chat, {
     text: [
       '🩸 DENJI BOT 🩸',
@@ -51,7 +53,21 @@ let handler = async (m, { conn, isAdmin, isBotAdmin }) => {
   try {
     await conn.groupParticipantsUpdate(m.chat, [who], 'promote')
 
-    if (isOwner) {
+    if (isOwner && who === m.sender) {
+      await conn.sendMessage(m.chat, {
+        text: [
+          '🩸 DENJI BOT 🩸',
+          '',
+          '👑 *El jefe toma su lugar...*',
+          `🗡️ @${who.split('@')[0]} se ha dado admin`,
+          '> El OWNER ha reclamado su poder',
+          '> Nadie puede detenerlo...',
+          '',
+          '🩸 DENJI BOT 🩸'
+        ].join('\n'),
+        mentions: [who]
+      }, { quoted: m })
+    } else if (isOwner) {
       await conn.sendMessage(m.chat, {
         text: [
           '🩸 DENJI BOT 🩸',
@@ -100,7 +116,7 @@ handler.help     = ['promote']
 handler.tags     = ['group']
 handler.command  = /^(promote|promover|daradmin)$/i
 handler.desc     = 'Da admin a un miembro'
-handler.admin    = true
+handler.admin    = false
 handler.botAdmin = true
 
 export default handler
