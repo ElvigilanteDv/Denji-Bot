@@ -9,6 +9,23 @@ const ownerNumbers = [
   '573223090406'
 ]
 
+const groupCache = new Map()
+
+function getCachedMetadata(conn, chatId) {
+  const cached = groupCache.get(chatId)
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.data
+  return null
+}
+
+async function getGroupMetadata(conn, chatId) {
+  const cached = getCachedMetadata(conn, chatId)
+  if (cached) return cached
+
+  const metadata = await conn.groupMetadata(chatId)
+  groupCache.set(chatId, { data: metadata, ts: Date.now() })
+  return metadata
+}
+
 function getOwners() {
   return ownerNumbers.map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net')
 }
@@ -116,7 +133,7 @@ handler.before = async (m, { conn }) => {
   const text = m.text || ''
   if (!text) return
 
-  const groupMetadata = await conn.groupMetadata(m.chat)
+  const groupMetadata = await getGroupMetadata(conn, chatId)
   const participants = groupMetadata.participants
   const userIsAdmin = isAdmin(participants, m.sender)
 
