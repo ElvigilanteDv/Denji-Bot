@@ -52,7 +52,7 @@ async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
   let res, d
 
   if (tipo === 'mp3') {
-    
+
     res = await axios.get(`${DELIRIUS_API}/ytmp3`, {
       params: { url: youtubeUrl },
       timeout: 90_000,
@@ -60,7 +60,7 @@ async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
       validateStatus: () => true
     })
     d = res.data
-    if (!d?.status) throw new Error(d?.msg || `HTTP ${res.status}`)
+    if (!d?.status) throw new Error(d?.msg || `Error al obtener audio (HTTP ${res.status})`)
     const remoteUrl = d?.data?.download || ''
     if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp3)')
     return {
@@ -79,7 +79,7 @@ async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
     validateStatus: () => true
   })
   d = res.data
-  if (!d?.status) throw new Error(d?.msg || `HTTP ${res.status}`)
+  if (!d?.status) throw new Error(d?.msg || `Error al obtener video ${fmt}p (HTTP ${res.status})`)
   const remoteUrl = d?.data?.download || ''
   if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp4)')
   return {
@@ -159,6 +159,7 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
   } catch (e) {
     console.log('[YT] URL directa falló, descargando local...', e.message)
   }
+
   let tempPath = null
   try {
     tempPath = await downloadToFile(remoteUrl, ext)
@@ -320,12 +321,22 @@ handler.before = async (m, { conn }) => {
 
     let result
     if (tipo === 'mp4') {
-      try {
-        result = await deliriusGetLink(ytUrl, 'mp4', quality)
-      } catch (e) {
-        console.log(`[YT] ${quality} falló (${e.message}), intentando 360p...`)
-        result = await deliriusGetLink(ytUrl, 'mp4', '360p')
+  
+      const fallbacks = ['720p', '480p', '360p', '240p']
+      const startIdx = Math.max(fallbacks.indexOf(quality), 0)
+      const chain = fallbacks.slice(startIdx)
+      let lastErr
+      for (const q of chain) {
+        try {
+          result = await deliriusGetLink(ytUrl, 'mp4', q)
+          break
+        } catch (e) {
+          lastErr = e
+          const next = chain[chain.indexOf(q) + 1]
+          console.log('[YT]', q, 'falló:', e.message, next ? '→ probando ' + next : '→ sin más opciones')
+        }
       }
+      if (!result) throw lastErr
     } else {
       result = await deliriusGetLink(ytUrl, 'mp3')
     }
