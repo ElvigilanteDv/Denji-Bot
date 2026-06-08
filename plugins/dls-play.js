@@ -186,7 +186,7 @@ handler.before = async (m, { conn }) => {
       await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
       return true
     }
-r
+
     const formatos = ['ytmp3', 'ytmp4480', 'ytmp4720']
     const fmt = formatos.find(f => id?.startsWith(f + SEP))
     if (!fmt) return false
