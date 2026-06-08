@@ -46,7 +46,6 @@ const buildYTUrl = (v) => {
   return null
 }
 
-// Strip the "p" suffix that Delirius does NOT accept: '360p' → '360'
 const stripP = (q = '') => q.replace(/p$/i, '')
 
 async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
@@ -73,7 +72,6 @@ async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
     }
   }
 
-  // /ytmp4v2 — quality WITHOUT "p" (e.g. '360', '480')
   const fmt = stripP(quality)
   res = await axios.get(`${DELIRIUS_API}/ytmp4v2`, {
     params: { url: youtubeUrl, format: fmt },
@@ -82,8 +80,11 @@ async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
     validateStatus: () => true
   })
   d = res.data
-  console.log('[YT API mp4]', JSON.stringify(d))
-  if (!d?.status) throw new Error(d?.msg || `Error al obtener video ${fmt}p (HTTP ${res.status})`)
+  // API sometimes returns a plain string error instead of JSON
+  if (typeof d === 'string' || !d?.status) {
+    const reason = typeof d === 'string' ? d.slice(0, 120) : (d?.msg || 'Sin URL')
+    throw new Error(reason)
+  }
   const remoteUrl = d?.data?.download || ''
   if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp4)')
   return {
@@ -144,7 +145,6 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
     ? `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${title}`
     : `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${title}\n💀 Calidad: *${quality}p*`
 
-  // Try sending via direct URL first
   try {
     if (tipo === 'mp3') {
       await conn.sendMessage(m.chat, {
@@ -165,7 +165,6 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
     console.log('[YT] URL directa falló, descargando local...', e.message)
   }
 
-  // Fallback: download to disk, then send
   let tempPath = null
   try {
     tempPath = await downloadToFile(remoteUrl, ext)
@@ -185,6 +184,33 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
     }
   } finally {
     deleteSafe(tempPath)
+  }
+}
+
+
+async function cobaltGetLink(youtubeUrl, quality = '360') {
+  const q = String(quality).replace(/p$/i, '')
+  const res = await axios.post('https://api.cobalt.tools/', {
+    url: youtubeUrl,
+    videoQuality: q,
+    filenameStyle: 'basic',
+    downloadMode: 'auto'
+  }, {
+    timeout: 60_000,
+    headers: {
+      'User-Agent': UA,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    validateStatus: () => true
+  })
+  const d = res.data
+  if (!d?.url) throw new Error(d?.error?.code || d?.text || 'Cobalt sin URL')
+  return {
+    remoteUrl: d.url,
+    title: '',
+    fileName: '',
+    quality: q
   }
 }
 
@@ -327,7 +353,7 @@ handler.before = async (m, { conn }) => {
 
     let result
     if (tipo === 'mp4') {
-      // Fallback cascade: requested quality → 360p → 240p
+
       const fallbacks = ['720p', '480p', '360p', '240p']
       const startIdx = Math.max(fallbacks.indexOf(quality), 0)
       const chain = fallbacks.slice(startIdx)
@@ -342,7 +368,11 @@ handler.before = async (m, { conn }) => {
           console.log('[YT]', q, 'falló:', e.message, next ? '→ probando ' + next : '→ sin más opciones')
         }
       }
-      if (!result) throw lastErr
+      if (!result) {
+        console.log('[YT] Delirius agotado, intentando Cobalt...')
+        const qNum = quality.replace(/p$/i, '')
+        result = await cobaltGetLink(ytUrl, qNum)
+      }
     } else {
       result = await deliriusGetLink(ytUrl, 'mp3')
     }
