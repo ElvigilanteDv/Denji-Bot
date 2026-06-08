@@ -1,3 +1,4 @@
+//Padre nuestro, que estás en el cielo,santificado sea tu nombre;venga a nosotros tu reino;hágase tu voluntad en la tierra como en el cielo.Danos hoy nuestro pan de cada día;perdona nuestras ofensas,como también nosotros perdonamos a los que nos ofenden;no nos dejes caer en la tentación,y líbranos del mal.Amén
 import yts from 'yt-search'
 import fetch from 'node-fetch'
 import {
@@ -6,7 +7,7 @@ import {
 } from '@whiskeysockets/baileys'
 
 const DV_API_URL = process.env.DV_API_URL || 'https://dv-yer-api.online'
-const DV_API_KEY = process.env.DV_API_KEY || 'dvyerDravenFX4'
+const DV_API_KEY = process.env.DV_API_KEY || ''
 
 const getVideoId = (text = '') => {
   const match = text.match(
@@ -27,22 +28,13 @@ const buildYTUrl = (v) => {
 }
 
 async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
-  console.log('[DVYER] URL recibida:', JSON.stringify(youtubeUrl))
-  console.log('[DVYER] Tipo:', tipo, '| Quality:', quality)
-  console.log('[DVYER] DV_API_URL:', DV_API_URL)
-  console.log('[DVYER] DV_API_KEY:', DV_API_KEY ? 'OK' : 'UNDEFINED')
-
   const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
-  const params = new URLSearchParams({ url: youtubeUrl, key: DV_API_KEY })
+  const params = new URLSearchParams({ url: youtubeUrl })
+  if (DV_API_KEY) params.set('apikey', DV_API_KEY)
   if (tipo === 'mp4') params.set('quality', quality)
-
-  const fullUrl = `${DV_API_URL}${endpoint}?${params}`
-  console.log('[DVYER] Request URL completa:', fullUrl)
-
-  const res = await fetch(fullUrl)
+  const res = await fetch(`${DV_API_URL}${endpoint}?${params}`)
   const json = await res.json()
-  console.log('[DVYER] Respuesta:', JSON.stringify(json))
-  if (!json.ok) throw new Error(json.error || json.message || 'API sin resultado')
+  if (!json.ok) throw new Error(json.detail || json.error || json.message || 'API sin resultado')
   return json
 }
 
@@ -138,9 +130,6 @@ handler.before = async (m, { conn }) => {
       const ytUrl = Buffer.from(urlB64, 'base64url').toString()
       const titulo = Buffer.from(titleB64, 'base64url').toString()
 
-      console.log('[YT PASO2] URL decodificada:', ytUrl)
-      console.log('[YT PASO2] Título:', titulo)
-
       const interactiveMessage = proto.Message.InteractiveMessage.create({
         header: { title: 'DENJI BOT - YOUTUBE', subtitle: '¿Cómo lo quieres?', hasMediaAttachment: false },
         body: { text: `🩸 DENJI BOT 🩸\n\n🔪 ${titulo || 'Video seleccionado'}\n\n💀 ¿Audio o Video?` },
@@ -185,7 +174,6 @@ handler.before = async (m, { conn }) => {
       await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
       return true
     }
-
     const formatos = ['ytmp3', 'ytmp4480', 'ytmp4720']
     const fmt = formatos.find(f => id?.startsWith(f + SEP))
     if (!fmt) return false
@@ -194,10 +182,6 @@ handler.before = async (m, { conn }) => {
     const [urlB64, titleB64] = payload.split(SEP)
     const ytUrl = Buffer.from(urlB64, 'base64url').toString()
     const titulo = Buffer.from(titleB64, 'base64url').toString()
-
-    console.log('[YT PASO3] fmt:', fmt)
-    console.log('[YT PASO3] URL decodificada:', ytUrl)
-    console.log('[YT PASO3] Título:', titulo)
 
     const tipo = fmt === 'ytmp3' ? 'mp3' : 'mp4'
     const quality = fmt === 'ytmp4720' ? '720p' : '480p'
