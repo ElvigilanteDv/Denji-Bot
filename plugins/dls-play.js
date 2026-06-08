@@ -1,6 +1,10 @@
-//Padre nuestro, que estás en el cielo,santificado sea tu nombre;venga a nosotros tu reino;hágase tu voluntad en la tierra como en el cielo.Danos hoy nuestro pan de cada día;perdona nuestras ofensas,como también nosotros perdonamos a los que nos ofenden;no nos dejes caer en la tentación,y líbranos del mal.Amén
+//funcione sapo hp 
 import yts from 'yt-search'
 import fetch from 'node-fetch'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import { pipeline } from 'stream/promises'
 import {
   generateWAMessageFromContent,
   proto
@@ -8,6 +12,16 @@ import {
 
 const DV_API_URL = process.env.DV_API_URL || 'https://dv-yer-api.online'
 const DV_API_KEY = process.env.DV_API_KEY || 'dvyerDravenFX4'
+const TMP_DIR = path.join(os.tmpdir(), 'denji-yt')
+
+function ensureTmpDir() {
+  try { fs.mkdirSync(TMP_DIR, { recursive: true }) } catch {}
+}
+ensureTmpDir()
+
+function deleteSafe(p) {
+  try { if (p && fs.existsSync(p)) fs.unlinkSync(p) } catch {}
+}
 
 const getVideoId = (text = '') => {
   const match = text.match(
@@ -36,6 +50,20 @@ async function dvDownload(youtubeUrl, tipo = 'mp4', quality = '480p') {
   const json = await res.json()
   if (!json.ok) throw new Error(json.detail || json.error || json.message || 'API sin resultado')
   return json
+}
+
+async function downloadToFile(streamUrl, outputPath) {
+  ensureTmpDir()
+  const res = await fetch(streamUrl, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    redirect: 'follow'
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status} al descargar stream`)
+  await pipeline(res.body, fs.createWriteStream(outputPath))
+  if (!fs.existsSync(outputPath)) throw new Error('No se guardó el archivo')
+  const size = fs.statSync(outputPath).size
+  if (size < 100) throw new Error('Archivo inválido o vacío')
+  return size
 }
 
 const SEP = '|~|'
@@ -76,7 +104,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       }, { quoted: m })
     }
 
-    const rows = validos.map((v, i) => {
+    const rows = validos.map((v) => {
       const ytUrl = buildYTUrl(v)
       const titulo = (v.title || '').substring(0, 50)
       const payload = Buffer.from(ytUrl).toString('base64url') + SEP + Buffer.from(titulo).toString('base64url')
@@ -127,7 +155,6 @@ handler.before = async (m, { conn }) => {
     if (id?.startsWith('ytdv' + SEP)) {
       const payload = id.slice(('ytdv' + SEP).length)
       const [urlB64, titleB64] = payload.split(SEP)
-      const ytUrl = Buffer.from(urlB64, 'base64url').toString()
       const titulo = Buffer.from(titleB64, 'base64url').toString()
 
       const interactiveMessage = proto.Message.InteractiveMessage.create({
@@ -142,24 +169,9 @@ handler.before = async (m, { conn }) => {
               sections: [{
                 title: '💀 ELIGE EL FORMATO',
                 rows: [
-                  {
-                    header: '🎵 AUDIO',
-                    title: 'MP3 - 128K',
-                    description: '🔪 Solo audio en alta calidad',
-                    id: 'ytmp3' + SEP + urlB64 + SEP + titleB64
-                  },
-                  {
-                    header: '🎬 VIDEO',
-                    title: 'MP4 - 480p',
-                    description: '💀 Video con audio incluido',
-                    id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64
-                  },
-                  {
-                    header: '🎬 VIDEO HD',
-                    title: 'MP4 - 720p',
-                    description: '🩸 Video en alta definición',
-                    id: 'ytmp4720' + SEP + urlB64 + SEP + titleB64
-                  }
+                  { header: '🎵 AUDIO', title: 'MP3 - 128K', description: '🔪 Solo audio', id: 'ytmp3' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬 VIDEO', title: 'MP4 - 480p', description: '💀 Video normal', id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬 VIDEO HD', title: 'MP4 - 720p', description: '🩸 Alta definición', id: 'ytmp4720' + SEP + urlB64 + SEP + titleB64 }
                 ]
               }]
             })
@@ -174,6 +186,7 @@ handler.before = async (m, { conn }) => {
       await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
       return true
     }
+r
     const formatos = ['ytmp3', 'ytmp4480', 'ytmp4720']
     const fmt = formatos.find(f => id?.startsWith(f + SEP))
     if (!fmt) return false
@@ -188,35 +201,45 @@ handler.before = async (m, { conn }) => {
 
     await m.react('⚰️')
     await conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${tipo === 'mp3' ? 'audio' : 'video'}...\n💀 ${titulo}`
+      text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${tipo === 'mp3' ? 'audio' : 'video'}...\n💀 ${titulo}\n\n> Esto puede tardar un momento...`
     }, { quoted: m })
 
     const result = await dvDownload(ytUrl, tipo, quality)
-    const downloadUrl = result.download_url || result.stream_url
+    const streamUrl = result.download_url || result.stream_url
     const finalTitle = result.title || titulo
-    const finalFilename = sanitizeFileName(result.filename || finalTitle)
+    const finalFilename = sanitizeFileName(finalTitle)
+    const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
+    const tempPath = path.join(TMP_DIR, `${Date.now()}${ext}`)
 
-    if (tipo === 'mp3') {
-      await conn.sendMessage(m.chat, {
-        audio: { url: downloadUrl },
-        mimetype: 'audio/mpeg',
-        fileName: finalFilename + '.mp3',
-        caption: `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || '128K'}*`
-      }, { quoted: m })
-    } else {
-      await conn.sendMessage(m.chat, {
-        video: { url: downloadUrl },
-        fileName: finalFilename + '.mp4',
-        mimetype: 'video/mp4',
-        caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
-      }, { quoted: m })
+    try {
+      await downloadToFile(streamUrl, tempPath)
+
+      if (tipo === 'mp3') {
+        await conn.sendMessage(m.chat, {
+          audio: { stream: fs.createReadStream(tempPath) },
+          mimetype: 'audio/mpeg',
+          fileName: finalFilename + ext,
+          caption: `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || '128K'}*`
+        }, { quoted: m })
+      } else {
+        await conn.sendMessage(m.chat, {
+          video: { stream: fs.createReadStream(tempPath) },
+          fileName: finalFilename + ext,
+          mimetype: 'video/mp4',
+          caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
+        }, { quoted: m })
+      }
+
+      await m.react('🩸')
+
+    } finally {
+      deleteSafe(tempPath)
     }
 
-    await m.react('🩸')
     return true
 
   } catch (e) {
-    console.log('[YT ERROR]', e)
+    console.log('[YT ERROR]', e.message)
     await m.react('💀')
     conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message }, { quoted: m })
     return true
