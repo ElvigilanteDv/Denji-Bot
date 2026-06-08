@@ -12,8 +12,7 @@ import {
 } from '@whiskeysockets/baileys'
 
 const SEP = '|~|'
-const DV_API_URL = process.env.DV_API_URL || 'https://dv-yer-api.online'
-const DV_API_KEY = process.env.DV_API_KEY || 'dvyerDravenFX4'
+const DELIRIUS_API = 'https://api.delirius.store/download'
 const TMP_DIR = path.join(os.tmpdir(), 'denji-yt')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145 Safari/537.36'
 const FILE_TIMEOUT = 150_000
@@ -47,41 +46,47 @@ const buildYTUrl = (v) => {
   return null
 }
 
-async function dvGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
-  const endpoint = tipo === 'mp3' ? '/ytmp3' : '/ytmp4'
-  const params = {
-    url: youtubeUrl,
-    apikey: DV_API_KEY,
-    mode: 'link'
-  }
-  if (tipo === 'mp4') {
-    params.quality = quality
-    params.fast = true
+const stripP = (q = '') => q.replace(/p$/i, '')
+
+async function deliriusGetLink(youtubeUrl, tipo = 'mp4', quality = '360p') {
+  let res, d
+
+  if (tipo === 'mp3') {
+    
+    res = await axios.get(`${DELIRIUS_API}/ytmp3`, {
+      params: { url: youtubeUrl },
+      timeout: 90_000,
+      headers: { 'User-Agent': UA, Accept: 'application/json' },
+      validateStatus: () => true
+    })
+    d = res.data
+    if (!d?.status) throw new Error(d?.msg || `HTTP ${res.status}`)
+    const remoteUrl = d?.data?.download || ''
+    if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp3)')
+    return {
+      remoteUrl,
+      title: d?.data?.title || '',
+      fileName: d?.data?.title || '',
+      quality: 'mp3'
+    }
   }
 
-  const res = await axios.get(`${DV_API_URL}${endpoint}`, {
-    params,
+  const fmt = stripP(quality)
+  res = await axios.get(`${DELIRIUS_API}/ytmp4v2`, {
+    params: { url: youtubeUrl, format: fmt },
     timeout: 90_000,
-    headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    headers: { 'User-Agent': UA, Accept: 'application/json' },
     validateStatus: () => true
   })
-
-  const d = res.data
-  if (res.status >= 400 || d?.ok === false) {
-    throw new Error(d?.detail || d?.message || `HTTP ${res.status}`)
-  }
-
-  const remoteUrl =
-    d?.download_url_full || d?.stream_url_full ||
-    d?.download_url || d?.stream_url || d?.url || ''
-
-  if (!remoteUrl) throw new Error('dv-yer no devolvió URL de descarga')
-
+  d = res.data
+  if (!d?.status) throw new Error(d?.msg || `HTTP ${res.status}`)
+  const remoteUrl = d?.data?.download || ''
+  if (!remoteUrl) throw new Error('Delirius no devolvió URL de descarga (mp4)')
   return {
     remoteUrl,
-    title: d?.title || '',
-    fileName: d?.filename || '',
-    quality: d?.quality || quality
+    title: d?.data?.title || '',
+    fileName: d?.data?.title || '',
+    quality: d?.data?.format || fmt
   }
 }
 
@@ -92,7 +97,12 @@ async function downloadToFile(remoteUrl, ext) {
   const res = await axios.get(remoteUrl, {
     responseType: 'stream',
     timeout: FILE_TIMEOUT,
-    headers: { 'User-Agent': UA, 'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.5', 'Accept-Language': 'es-ES,es;q=0.9', 'Accept-Encoding': 'identity', 'Referer': 'https://dv-yer-api.online/', 'Origin': 'https://dv-yer-api.online', 'Sec-Fetch-Dest': 'video', 'Sec-Fetch-Mode': 'no-cors', 'Sec-Fetch-Site': 'same-origin' },
+    headers: {
+      'User-Agent': UA,
+      'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.5',
+      'Accept-Language': 'es-ES,es;q=0.9',
+      'Accept-Encoding': 'identity'
+    },
     maxRedirects: 5,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
@@ -122,12 +132,13 @@ async function downloadToFile(remoteUrl, ext) {
 
   return tempPath
 }
+
 async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName }) {
   const ext = tipo === 'mp3' ? '.mp3' : '.mp4'
   const safeName = sanitizeFileName(fileName || title) + ext
   const cap = tipo === 'mp3'
     ? `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${title}`
-    : `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${title}\n💀 Calidad: *${quality}*`
+    : `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${title}\n💀 Calidad: *${quality}p*`
 
   try {
     if (tipo === 'mp3') {
@@ -148,7 +159,6 @@ async function sendMedia(conn, m, { tipo, remoteUrl, title, quality, fileName })
   } catch (e) {
     console.log('[YT] URL directa falló, descargando local...', e.message)
   }
-
   let tempPath = null
   try {
     tempPath = await downloadToFile(remoteUrl, ext)
@@ -270,9 +280,10 @@ handler.before = async (m, { conn }) => {
               sections: [{
                 title: '💀 ELIGE EL FORMATO',
                 rows: [
-                  { header: '🎵 AUDIO', title: 'MP3 - 128K', description: '🔪 Solo audio', id: 'ytmp3' + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO SD', title: 'MP4 - 360p', description: '💀 Video estándar', id: 'ytmp4360' + SEP + urlB64 + SEP + titleB64 },
-                  { header: '🎬 VIDEO HD', title: 'MP4 - 480p', description: '🩸 Video HD', id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64 }
+                  { header: '🎵 AUDIO',    title: 'MP3 - 128K', description: '🔪 Solo audio',      id: 'ytmp3'    + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬 VIDEO SD', title: 'MP4 - 360p', description: '💀 Video estándar',  id: 'ytmp4360' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬 VIDEO HD', title: 'MP4 - 480p', description: '🩸 Video HD',        id: 'ytmp4480' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬 VIDEO FHD',title: 'MP4 - 720p', description: '🩸 Video Full HD',   id: 'ytmp4720' + SEP + urlB64 + SEP + titleB64 }
                 ]
               }]
             })
@@ -288,7 +299,7 @@ handler.before = async (m, { conn }) => {
       return true
     }
 
-    const formatos = ['ytmp3', 'ytmp4360', 'ytmp4480']
+    const formatos = ['ytmp3', 'ytmp4360', 'ytmp4480', 'ytmp4720']
     const fmt = formatos.find(f => id?.startsWith(f + SEP))
     if (!fmt) return false
 
@@ -298,8 +309,9 @@ handler.before = async (m, { conn }) => {
     const titulo = Buffer.from(titleB64, 'base64url').toString()
 
     const tipo    = fmt === 'ytmp3' ? 'mp3' : 'mp4'
-
-    const quality = fmt === 'ytmp4480' ? '480p' : '360p'
+    const quality = fmt === 'ytmp4720' ? '720p'
+                  : fmt === 'ytmp4480' ? '480p'
+                  : '360p'
 
     await m.react('⚰️')
     await conn.sendMessage(m.chat, {
@@ -309,13 +321,13 @@ handler.before = async (m, { conn }) => {
     let result
     if (tipo === 'mp4') {
       try {
-        result = await dvGetLink(ytUrl, 'mp4', quality)
+        result = await deliriusGetLink(ytUrl, 'mp4', quality)
       } catch (e) {
-        console.log(`[YT] ${quality} falló (${e.message}), intentando 240p...`)
-        result = await dvGetLink(ytUrl, 'mp4', '240p')
+        console.log(`[YT] ${quality} falló (${e.message}), intentando 360p...`)
+        result = await deliriusGetLink(ytUrl, 'mp4', '360p')
       }
     } else {
-      result = await dvGetLink(ytUrl, 'mp3')
+      result = await deliriusGetLink(ytUrl, 'mp3')
     }
 
     await sendMedia(conn, m, {
