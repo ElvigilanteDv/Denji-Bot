@@ -100,6 +100,7 @@ handler.help     = ['promote']
 handler.tags     = ['group']
 handler.command  = /^(promote|promover|daradmin)$/i
 handler.desc     = 'Da admin a un miembro'
-handler.admin    = false
+handler.admin    = true
 handler.botAdmin = true
+
 export default handler
