@@ -257,18 +257,16 @@ handler.before = async (m, { conn }) => {
     const tempPath = path.join(TMP_DIR, `${Date.now()}${ext}`)
 
     try {
-      await downloadToFile(streamUrl, tempPath)
-
       if (tipo === 'mp3') {
         await conn.sendMessage(m.chat, {
-          audio: { stream: fs.createReadStream(tempPath) },
+          audio: { url: streamUrl },
           mimetype: 'audio/mpeg',
           fileName: finalFilename + ext,
           caption: `🩸 DENJI BOT 🩸\n\n🔪 Audio descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || '128K'}*`
         }, { quoted: m })
       } else {
         await conn.sendMessage(m.chat, {
-          video: { stream: fs.createReadStream(tempPath) },
+          video: { url: streamUrl },
           fileName: finalFilename + ext,
           mimetype: 'video/mp4',
           caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
