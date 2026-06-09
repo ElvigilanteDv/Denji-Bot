@@ -45,8 +45,7 @@ function getDefaultConfig() {
     antilinkWarnLimit: 3,
     antilinkWarnings: {},
     welcome: false,
-    antiarabe: false,
-    modoadmin: false
+    antiarabe: false
   }
 }
 
@@ -89,6 +88,9 @@ const handler = async (m, { conn, command, args }) => {
   const chatId = m.chat
   const chat = getChatConfig(botNumber, chatId)
 
+  // modoadmin se lee de global.db para que el handler.js lo detecte
+  const modoadminActual = global.db.data.chats[m.chat]?.modoadmin || false
+
   if (/^(on|off)$/i.test(command)) {
     const type = (args[0] || '').toLowerCase()
     const enable = command.toLowerCase() === 'on'
@@ -104,13 +106,28 @@ const handler = async (m, { conn, command, args }) => {
 ${chat.antilink ? '✅' : '❌'} antilink
 ${chat.welcome ? '✅' : '❌'} welcome
 ${chat.antiarabe ? '✅' : '❌'} antiarabe
-${chat.modoadmin ? '✅' : '❌'} modoadmin
+${modoadminActual ? '✅' : '❌'} modoadmin
 
 🔪 modo antilink: *${chat.antilinkMode}*
 ☠️ límite de advertencias: *${chat.antilinkWarnLimit}*
 
 > Usa *.on <función>* o *.off <función>*
 > Usa *.antilink delete* o *.antilink warnkick*`
+      }, { quoted: m })
+    }
+
+    // modoadmin se guarda en global.db, el resto en settings.json
+    if (type === 'modoadmin') {
+      global.db.data.chats[m.chat].modoadmin = enable
+      global.markDatabaseModified()
+
+      return conn.sendMessage(m.chat, {
+        text:
+`⛓️ *DENJI BOT* ⛓️
+
+${enable ? '🩸' : '☠️'} *MODOADMIN ${enable ? 'ACTIVADO' : 'DESACTIVADO'}*
+${enable ? '🔪 Solo los admins pueden usar comandos.' : '🩸 Todos pueden usar comandos nuevamente.'}
+> La configuración ha sido escrita con sangre.`
       }, { quoted: m })
     }
 
