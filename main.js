@@ -579,7 +579,7 @@ conn.ev.on('group-participants.update', async (update) => {
   try {
     pp = await conn.profilePictureUrl(id, 'image')
   } catch {
-    pp = 'https://files.catbox.moe/r60c8l.jpg'
+    pp = 'https://files.catbox.moe/1hp2vx.jpg'
   }
 
   for (let user of participants) {
