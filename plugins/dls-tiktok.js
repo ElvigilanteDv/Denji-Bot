@@ -235,11 +235,35 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 }
 
 handler.before = async (m, { conn }) => {
+  console.log('====== TT DEBUG START ======')
+  try {
+    console.log('m.sender =>', m.sender)
+    console.log('m.chat =>', m.chat)
+    console.log('m.key =>', JSON.stringify(m.key, null, 2))
+    console.log('m.text =>', m.text)
+    console.log('FULL MESSAGE RAW =>')
+    console.dir(m.message, { depth: null })
+    console.log('FULL MESSAGE JSON =>', JSON.stringify(m.message, null, 2))
+  } catch (e) {
+    console.log('DEBUG LOG ERROR =>', e)
+  }
+
   const nativeFlow = m.message?.interactiveResponseMessage?.nativeFlowResponseMessage
-  if (!nativeFlow) return false
+  console.log('nativeFlow exists? =>', !!nativeFlow)
+
+  if (!nativeFlow) {
+    console.log('====== TT DEBUG END (NO NATIVE FLOW) ======')
+    return false
+  }
 
   try {
+    console.log('NATIVE FLOW RAW =>')
+    console.dir(nativeFlow, { depth: null })
+    console.log('NATIVE FLOW JSON =>', JSON.stringify(nativeFlow, null, 2))
+    console.log('paramsJson =>', nativeFlow.paramsJson)
+
     const params = JSON.parse(nativeFlow.paramsJson || '{}')
+    console.log('PARSED PARAMS =>', JSON.stringify(params, null, 2))
 
     const selectedId =
       params?.id ||
@@ -248,10 +272,20 @@ handler.before = async (m, { conn }) => {
       params?.single_select_reply?.selected_row_id ||
       null
 
-    if (!selectedId || !selectedId.startsWith('ttdl_')) return false
+    console.log('selectedId =>', selectedId)
+
+    if (!selectedId || !selectedId.startsWith('ttdl_')) {
+      console.log('====== TT DEBUG END (INVALID selectedId) ======')
+      return false
+    }
 
     const index = Number(selectedId.replace('ttdl_', ''))
-    if (Number.isNaN(index)) return false
+    console.log('index =>', index)
+
+    if (Number.isNaN(index)) {
+      console.log('====== TT DEBUG END (NaN index) ======')
+      return false
+    }
 
     const who = m.sender
     let user = global.db.data.users[who]
@@ -264,6 +298,10 @@ handler.before = async (m, { conn }) => {
     const cacheKey = getCacheKey(m.chat, m.sender)
     const cache = global.ttSearchCache[cacheKey]
 
+    console.log('cacheKey =>', cacheKey)
+    console.log('cache exists? =>', !!cache)
+    console.log('cache =>', JSON.stringify(cache, null, 2))
+
     if (!cache || !Array.isArray(cache.results) || !cache.results[index]) {
       await conn.sendMessage(m.chat, {
         text:
@@ -271,10 +309,14 @@ handler.before = async (m, { conn }) => {
           '💀 La búsqueda expiró o no encontré ese resultado\n\n' +
           '> Haz la búsqueda otra vez'
       }, { quoted: m })
+
+      console.log('====== TT DEBUG END (CACHE MISS) ======')
       return true
     }
 
     const misDiamantes = getDiamonds(user)
+    console.log('misDiamantes =>', misDiamantes)
+
     if (misDiamantes < 1) {
       await conn.sendMessage(m.chat, {
         text:
@@ -282,12 +324,17 @@ handler.before = async (m, { conn }) => {
           '💀 No tienes 1 diamante\n\n' +
           '> Usa #work para ganar'
       }, { quoted: m })
+
+      console.log('====== TT DEBUG END (NO DIAMONDS) ======')
       return true
     }
 
     const selectedVideo = cache.results[index]
     const selectedVideoUrl = selectedVideo.url
     const fallbackTitle = selectedVideo.title || 'Sin título'
+
+    console.log('selectedVideo =>', JSON.stringify(selectedVideo, null, 2))
+    console.log('selectedVideoUrl =>', selectedVideoUrl)
 
     setDiamonds(user, misDiamantes - 1)
 
@@ -300,6 +347,8 @@ handler.before = async (m, { conn }) => {
     }, { quoted: m })
 
     const json = await downloadTikTok(selectedVideoUrl)
+    console.log('download response =>', JSON.stringify(json, null, 2))
+
     const total = getDiamonds(user)
     const videoDownloadUrl = json.data.meta.media[0].org
 
@@ -315,6 +364,7 @@ handler.before = async (m, { conn }) => {
     }, { quoted: m })
 
     await m.react('🩸')
+    console.log('====== TT DEBUG END (SUCCESS) ======')
     return true
   } catch (e) {
     console.log('TT BEFORE ERROR =>', e)
@@ -324,15 +374,18 @@ handler.before = async (m, { conn }) => {
       const user = global.db.data.users[who]
       if (user) {
         const current = getDiamonds(user)
-        if (current >= 0) setDiamonds(user, current + 1)
+        setDiamonds(user, current + 1)
       }
-    } catch {}
+    } catch (restoreError) {
+      console.log('RESTORE DIAMONDS ERROR =>', restoreError)
+    }
 
     await conn.sendMessage(m.chat, {
       text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message
     }, { quoted: m })
 
     await m.react('💀')
+    console.log('====== TT DEBUG END (ERROR) ======')
     return true
   }
 }
