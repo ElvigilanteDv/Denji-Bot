@@ -73,11 +73,11 @@ global.timestamp = { start: new Date() };
 
 const __dirname = global.__dirname(import.meta.url);
 
-console.log(chalk.bold.cyan('\n' + '═'.repeat(60)));
-console.log(chalk.bold.yellow('   𑁍 HINATA BOT - BYAKUGAN ACTIVADO 𑁍'));
-console.log(chalk.bold.cyan('═'.repeat(60)));
-console.log(chalk.magenta('   「No me rendiré, porque quiero ser fuerte como Naruto-kun」'));
-console.log(chalk.bold.cyan('═'.repeat(60) + '\n'));
+console.log(chalk.bold.red('\n' + '═'.repeat(60)));
+console.log(chalk.bold.red('   🪚 DENJI BOT - MOTOSIERRA ENCENDIDA 🩸'));
+console.log(chalk.bold.red('═'.repeat(60)));
+console.log(chalk.magenta('   「La motosierra siempre estará encendida, pase lo que pase」'));
+console.log(chalk.bold.red('═'.repeat(60) + '\n'));
 
 global.opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse());
 global.prefix = new RegExp(
@@ -172,19 +172,19 @@ let handler;
 try {
   const handlerModule = await import('./handler.js');
   handler = handlerModule.handler;
-  console.log(chalk.green('✅ Handler cargado correctamente'));
+  console.log(chalk.green('✅ [DENJI BOT] Motosierra cargada correctamente'));
 } catch (e) {
-  console.error(chalk.red('[ERROR] No se pudo cargar el handler principal:'), e);
+  console.error(chalk.red('[ERROR] No se pudo encender la motosierra:'), e);
   process.exit(1);
 }
 
 async function reconnectSubBot(botPath) {
-  console.log(chalk.yellow(`𑁍 [HINATA BOT] Despertando sub-bot: ${path.basename(botPath)}`));
+  console.log(chalk.yellow(`🪚 [DENJI BOT] Despertando sub-bot: ${path.basename(botPath)}`));
   try {
     const { state: subBotState, saveCreds: saveSubBotCreds } = await useMultiFileAuthState(botPath);
 
     if (!subBotState.creds.registered) {
-      console.warn(chalk.yellow(`⚠️ [HINATA BOT] Sub-bot en ${path.basename(botPath)} no está registrado`));
+      console.warn(chalk.yellow(`⚠️ [DENJI BOT] Sub-bot en ${path.basename(botPath)} no está registrado`));
       return;
     }
 
@@ -213,22 +213,22 @@ async function reconnectSubBot(botPath) {
     subBotConn.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect } = update;
       if (connection === 'open') {
-        console.log(chalk.green(`✨ [HINATA BOT] Sub-bot despertado: ${path.basename(botPath)}`));
+        console.log(chalk.green(`🩸 [DENJI BOT] Sub-bot despertado: ${path.basename(botPath)}`));
         const yaExiste = global.conns.some(c => c.user?.jid === subBotConn.user?.jid);
         if (!yaExiste) {
           global.conns.push(subBotConn);
-          console.log(chalk.green(`𑁍 [HINATA BOT] Sub-bot fusionado: ${subBotConn.user?.jid}`));
+          console.log(chalk.green(`🪚 [DENJI BOT] Sub-bot fusionado: ${subBotConn.user?.jid}`));
         }
       } else if (connection === 'close') {
         const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-        console.error(chalk.red(`💥 [HINATA BOT] Sub-bot caído en ${path.basename(botPath)}. Razón: ${reason}`));
+        console.error(chalk.red(`💥 [DENJI BOT] Sub-bot caído en ${path.basename(botPath)}. Razón: ${reason}`));
 
         if (reason === DisconnectReason.loggedOut || reason === 401) {
-          console.log(chalk.red(`❌ [HINATA BOT] Desconexión permanente. Eliminando ${path.basename(botPath)}.`));
+          console.log(chalk.red(`❌ [DENJI BOT] Desconexión permanente. Eliminando ${path.basename(botPath)}.`));
           global.conns = global.conns.filter(conn => conn.user?.jid !== subBotConn.user?.jid);
           try {
             rmSync(botPath, { recursive: true, force: true });
-            console.log(chalk.green(`✅ [HINATA BOT] Sub-bot eliminado: ${botPath}`));
+            console.log(chalk.green(`✅ [DENJI BOT] Sub-bot eliminado: ${botPath}`));
           } catch (e) {
             console.error(chalk.red(`❌ [ERROR] No se pudo eliminar ${botPath}: ${e}`));
           }
@@ -239,7 +239,7 @@ async function reconnectSubBot(botPath) {
     subBotConn.ev.on('creds.update', saveSubBotCreds);
     subBotConn.handler = handler.bind(subBotConn);
     subBotConn.ev.on('messages.upsert', subBotConn.handler);
-    console.log(chalk.blue(`𑁍 [HINATA BOT] Manejador asignado a: ${path.basename(botPath)}`));
+    console.log(chalk.blue(`🪚 [DENJI BOT] Motosierra asignada a: ${path.basename(botPath)}`));
 
     if (!global.subBots) {
       global.subBots = {};
@@ -256,31 +256,31 @@ async function startSubBots() {
 
   if (!existsSync(rutaJadiBot)) {
     mkdirSync(rutaJadiBot, { recursive: true });
-    console.log(chalk.bold.cyan(`📁 [HINATA BOT] Carpeta de sub-bots creada: ${rutaJadiBot}`));
+    console.log(chalk.bold.red(`📁 [DENJI BOT] Carpeta de sub-bots creada: ${rutaJadiBot}`));
   } else {
-    console.log(chalk.bold.cyan(`📁 [HINATA BOT] Carpeta de sub-bots detectada: ${rutaJadiBot}`));
+    console.log(chalk.bold.red(`📁 [DENJI BOT] Carpeta de sub-bots detectada: ${rutaJadiBot}`));
   }
 
   const readRutaJadiBot = readdirSync(rutaJadiBot);
   if (readRutaJadiBot.length > 0) {
     const credsFile = 'creds.json';
-    console.log(chalk.magenta(`𑁍 [HINATA BOT] Buscando sub-bots... Total: ${readRutaJadiBot.length}`));
+    console.log(chalk.magenta(`🩸 [DENJI BOT] Buscando sub-bots... Total: ${readRutaJadiBot.length}`));
 
     for (const subBotDir of readRutaJadiBot) {
       const botPath = join(rutaJadiBot, subBotDir);
       if (statSync(botPath).isDirectory()) {
         const readBotPath = readdirSync(botPath);
         if (readBotPath.includes(credsFile)) {
-          console.log(chalk.magenta(`𑁍 [HINATA BOT] Sub-bot detectado en ${subBotDir}. Despertando...`));
+          console.log(chalk.magenta(`🪚 [DENJI BOT] Sub-bot detectado en ${subBotDir}. Despertando...`));
           await reconnectSubBot(botPath);
         } else {
-          console.log(chalk.yellow(`⚠️ [HINATA BOT] Sub-bot latente en ${subBotDir} (sin creds.json)`));
+          console.log(chalk.yellow(`⚠️ [DENJI BOT] Sub-bot latente en ${subBotDir} (sin creds.json)`));
         }
       }
     }
-    console.log(chalk.magenta(`✅ [HINATA BOT] Proceso de sub-bots completado.`));
+    console.log(chalk.magenta(`✅ [DENJI BOT] Proceso de sub-bots completado.`));
   } else {
-    console.log(chalk.gray(`🌙 [HINATA BOT] No hay sub-bots para despertar.`));
+    console.log(chalk.gray(`💀 [DENJI BOT] No hay sub-bots para despertar.`));
   }
 }
 
@@ -288,16 +288,16 @@ await startSubBots();
 
 async function handleLogin() {
   if (conn.authState.creds.registered) {
-    console.log(chalk.green('✅ [HINATA BOT] Ya registrada.'));
+    console.log(chalk.green('✅ [DENJI BOT] Motosierra ya registrada.'));
     return;
   }
 
   let loginMethod = await question(
-    chalk.green(`\n` +
+    chalk.red(`\n` +
     `╔════════════════════════════════════╗\n` +
-    `║     𑁍 HINATA BOT MODE 𑁍          ║\n` +
+    `║     🪚 DENJI BOT MODE 🩸          ║\n` +
     `╠════════════════════════════════════╣\n` +
-    `║ ¿Cómo deseas activar el Byakugan?  ║\n` +
+    `║ ¿Cómo quieres encender la sierra?  ║\n` +
     `║                                    ║\n` +
     `║ 📱 Escribe "code" para código      ║\n` +
     `║    de emparejamiento               ║\n` +
@@ -311,7 +311,7 @@ async function handleLogin() {
   loginMethod = loginMethod.toLowerCase().trim();
 
   if (loginMethod === 'code') {
-    let phoneNumber = await question(chalk.cyan('📱 Ingresa el número de WhatsApp (con código país, ej: 51910227479):\n> '));
+    let phoneNumber = await question(chalk.red('📱 Ingresa el número de WhatsApp (con código país, ej: 51910227479):\n> '));
     phoneNumber = phoneNumber.replace(/\D/g, '');
 
     if (phoneNumber.startsWith('52') && phoneNumber.length === 12) {
@@ -325,18 +325,18 @@ async function handleLogin() {
     if (typeof conn.requestPairingCode === 'function') {
       try {
         if (conn.ws.readyState === ws.OPEN) {
-          console.log(chalk.yellow('𑁍 Generando código de emparejamiento...'));
+          console.log(chalk.yellow('🪚 Rev la motosierra... generando código...'));
           let code = await conn.requestPairingCode(phoneNumber);
           code = code?.match(/.{1,4}/g)?.join('-') || code;
-          console.log(chalk.bold.green('\n════════════════════════════════════'));
-          console.log(chalk.bold.yellow(`   🔐 CÓDIGO DE EMPAREJAMIENTO:`));
-          console.log(chalk.bold.cyan(`      ${code}`));
-          console.log(chalk.bold.green('════════════════════════════════════\n'));
+          console.log(chalk.bold.red('\n════════════════════════════════════'));
+          console.log(chalk.bold.yellow(`   🩸 CÓDIGO DE EMPAREJAMIENTO:`));
+          console.log(chalk.bold.red(`      ${code}`));
+          console.log(chalk.bold.red('════════════════════════════════════\n'));
         } else {
-          console.log(chalk.red('❌ La conexión principal no está abierta. Intenta nuevamente.'));
+          console.log(chalk.red('❌ La motosierra no está conectada. Intenta nuevamente.'));
         }
       } catch (e) {
-        console.log(chalk.red('❌ Error al solicitar código de emparejamiento:'), e.message || e);
+        console.log(chalk.red('❌ Error al encender la motosierra:'), e.message || e);
       }
     } else {
       console.log(chalk.red('❌ Tu versión de Baileys no soporta emparejamiento por código.'));
@@ -345,9 +345,9 @@ async function handleLogin() {
     console.log(chalk.yellow('🔳 Generando código QR, escanéalo con tu WhatsApp...\n'));
     conn.ev.on('connection.update', ({ qr }) => {
       if (qr) {
-        console.log(chalk.green('📱 ESCANEA ESTE CÓDIGO QR:'));
+        console.log(chalk.red('🪚 ESCANEA ESTE CÓDIGO QR:'));
         qrcode.generate(qr, { small: true });
-        console.log(chalk.yellow('\n⏳ Esperando escaneo...\n'));
+        console.log(chalk.yellow('\n🩸 La motosierra espera...\n'));
       }
     });
   }
@@ -364,7 +364,7 @@ if (!opts['test']) {
       if (global.db.data && global.isDatabaseModified) {
         await global.db.write();
         global.isDatabaseModified = false;
-        console.log(chalk.gray('💾 [HINATA BOT] Base de datos guardada'));
+        console.log(chalk.gray('💾 [DENJI BOT] Sangre guardada en la base de datos'));
       }
       if (opts['autocleartmp']) {
         const tmp = [tmpdir(), 'tmp', 'serbot'];
@@ -390,16 +390,16 @@ function clearTmp() {
 setInterval(() => {
   if (global.stopped === 'close' || !conn || !conn.user) return;
   clearTmp();
-  console.log(chalk.gray('🧹 [HINATA BOT] Limpieza temporal completada'));
+  console.log(chalk.gray('🪚 [DENJI BOT] Limpieza sangrienta completada'));
 }, 180000);
 
 if (typeof global.gc === 'function') {
   setInterval(() => {
-    console.log(chalk.gray(`🧠 [HINATA BOT] Optimizando chakra...`));
+    console.log(chalk.gray(`🩸 [DENJI BOT] Afilando la motosierra...`));
     global.gc();
   }, 180000);
 } else {
-  console.log(chalk.yellow(`⚠️ [HINATA BOT] Para optimizar memoria, ejecuta con --expose-gc`));
+  console.log(chalk.yellow(`⚠️ [DENJI BOT] Para afinar más la sierra, ejecuta con --expose-gc`));
 }
 
 async function connectionUpdate(update) {
@@ -408,7 +408,7 @@ async function connectionUpdate(update) {
 
   if (isNewLogin) {
     conn.isInit = true;
-    console.log(chalk.green('✅ [HINATA BOT] Nuevo login detectado'));
+    console.log(chalk.green('✅ [DENJI BOT] Nuevo login detectado'));
   }
 
   const code =
@@ -423,18 +423,18 @@ async function connectionUpdate(update) {
   if (global.db.data == null) await loadDatabase();
 
   if (connection === 'open') {
-    console.log(chalk.bold.green('\n════════════════════════════════════'));
-    console.log(chalk.bold.yellow('   𑁍 HINATA BOT HA DESPERTADO 𑁍'));
-    console.log(chalk.bold.cyan(`   👤 Usuario: ${conn.user?.name || 'Hinata'}`));
-    console.log(chalk.bold.cyan(`   📱 Número: ${conn.user?.id?.split(':')[0] || 'Desconocido'}`));
-    console.log(chalk.bold.green('════════════════════════════════════\n'));
+    console.log(chalk.bold.red('\n════════════════════════════════════'));
+    console.log(chalk.bold.red('   🪚 DENJI BOT HA DESPERTADO 🩸'));
+    console.log(chalk.bold.red(`   💀 Usuario: ${conn.user?.name || 'Denji'}`));
+    console.log(chalk.bold.red(`   📱 Número: ${conn.user?.id?.split(':')[0] || 'Desconocido'}`));
+    console.log(chalk.bold.red('════════════════════════════════════\n'));
   }
 
   const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
 
   if (reason === 405) {
     if (existsSync('./sessions/creds.json')) unlinkSync('./sessions/creds.json');
-    console.log(chalk.bold.redBright(`⚠️ Conexión reemplazada, reiniciando...`));
+    console.log(chalk.bold.redBright(`⚠️ Conexión reemplazada, reiniciando la motosierra...`));
     process.send('reset');
   }
 
@@ -446,7 +446,7 @@ async function connectionUpdate(update) {
       case DisconnectReason.connectionClosed:
       case DisconnectReason.connectionLost:
       case DisconnectReason.timedOut:
-        conn.logger.warn(`⚠️ Conexión perdida, reconectando...`);
+        conn.logger.warn(`⚠️ Motosierra perdió señal, reconectando...`);
         await global.reloadHandler(true).catch(console.error);
         break;
       case DisconnectReason.connectionReplaced:
@@ -456,7 +456,7 @@ async function connectionUpdate(update) {
         conn.logger.error(`❌ Sesión cerrada, elimina la carpeta ${global.authFile}`);
         break;
       case DisconnectReason.restartRequired:
-        conn.logger.info(`🔄 Reinicio necesario`);
+        conn.logger.info(`🔄 Reinicio necesario, afilando la sierra...`);
         await global.reloadHandler(true).catch(console.error);
         break;
       default:
@@ -468,7 +468,7 @@ async function connectionUpdate(update) {
 }
 
 process.on('uncaughtException', (err) => {
-  console.error(chalk.red('💥 [HINATA BOT] Error no capturado:'), err);
+  console.error(chalk.red('💥 [DENJI BOT] Error no capturado:'), err);
 });
 
 let isInit = true;
@@ -513,7 +513,7 @@ const pluginFilter = (filename) => /\.js$/.test(filename);
 global.plugins = {};
 
 async function filesInit() {
-  console.log(chalk.blue('📂 [HINATA BOT] Cargando plugins...'));
+  console.log(chalk.blue('📂 [DENJI BOT] Cargando motosierras (plugins)...'));
   let loaded = 0;
   for (const filename of readdirSync(pluginFolder).filter(pluginFilter)) {
     try {
@@ -526,7 +526,7 @@ async function filesInit() {
       delete global.plugins[filename];
     }
   }
-  console.log(chalk.green(`✅ [HINATA BOT] ${loaded} plugins cargados correctamente`));
+  console.log(chalk.green(`✅ [DENJI BOT] ${loaded} motosierras cargadas correctamente`));
 }
 
 await filesInit();
@@ -535,12 +535,12 @@ global.reload = async (_ev, filename) => {
   if (pluginFilter(filename)) {
     const dir = global.__filename(join(pluginFolder, filename), true);
     if (filename in global.plugins) {
-      if (existsSync(dir)) conn.logger.info(`🔄 Plugin actualizado - '${filename}'`);
+      if (existsSync(dir)) conn.logger.info(`🔄 Motosierra afilada - '${filename}'`);
       else {
-        conn.logger.warn(`🗑️ Plugin eliminado - '${filename}'`);
+        conn.logger.warn(`🗑️ Motosierra eliminada - '${filename}'`);
         return delete global.plugins[filename];
       }
-    } else conn.logger.info(`✨ Nuevo plugin - '${filename}'`);
+    } else conn.logger.info(`🪚 Nueva motosierra - '${filename}'`);
 
     const err = syntaxerror(readFileSync(dir), filename, {
       sourceType: 'module',
@@ -564,10 +564,10 @@ Object.freeze(global.reload);
 watch(pluginFolder, global.reload);
 await global.reloadHandler();
 
-console.log(chalk.bold.magenta('\n' + '⭐'.repeat(30)));
-console.log(chalk.bold.yellow('   𑁍 HINATA BOT - BYAKUGAN COMPLETO 𑁍'));
-console.log(chalk.bold.cyan('   「La bot está lista para ayudar」'));
-console.log(chalk.bold.magenta('⭐'.repeat(30) + '\n'));
+console.log(chalk.bold.red('\n' + '🩸'.repeat(20)));
+console.log(chalk.bold.red('   🪚 DENJI BOT - LISTO PARA CORTAR 🩸'));
+console.log(chalk.bold.red('   「El matadero está abierto, nadie escapa」'));
+console.log(chalk.bold.red('🩸'.repeat(20) + '\n'));
 
 conn.ev.on('group-participants.update', async (update) => {
   const { id, participants, action } = update
@@ -591,13 +591,12 @@ conn.ev.on('group-participants.update', async (update) => {
           .replace(/@group/g, metadata.subject)
           .replace(/@members/g, metadata.participants.length)
       } else {
-        texto = '⛩️ 「 HINATA BOT 」 ⛩️\n\n'
-        texto += '桜 » *BIENVENID@*\n'
-        texto += '風 » @' + user.split('@')[0] + '\n'
-        texto += '花 » ' + metadata.subject + '\n'
-        texto += '桜 » Miembros: ' + metadata.participants.length + '\n\n'
-        texto += '✧･ﾟ: *✧･ﾟ:* *:･ﾟ✧*:･ﾟ✧\n\n'
-        texto += '> Gracias por unirte ♡'
+        texto = '🪚「 DENJI BOT — BIENVENIDA SANGRIENTA 」🩸\n\n'
+        texto += '💀 » *¡DENJI REV LA MOTOSIERRA!*\n'
+        texto += '🩸 » @' + user.split('@')[0] + ' acaba de entrar al matadero\n'
+        texto += '🪚 » Grupo: ' + metadata.subject + '\n'
+        texto += '☠️ » Víctimas totales: ' + metadata.participants.length + '\n\n'
+        texto += '> Bienvenid@ ... si es que sobrevives 🩸'
       }
 
       await conn.sendMessage(id, {
@@ -613,12 +612,12 @@ conn.ev.on('group-participants.update', async (update) => {
           .replace(/@group/g, metadata.subject)
           .replace(/@members/g, metadata.participants.length)
       } else {
-        texto = '⛩️ 「 HINATA BOT 」 ⛩️\n\n'
-        texto += '桜 » *ADIOS*\n'
-        texto += '風 » @' + user.split('@')[0] + '\n'
-        texto += '花 » ' + metadata.subject + '\n'
-        texto += '桜 » Miembros: ' + metadata.participants.length + '\n\n'
-        texto += '✧･ﾟ: *✧･ﾟ:* *:･ﾟ✧*:･ﾟ✧'
+        texto = '🪚「 DENJI BOT — EXPULSADO DEL MATADERO 」🩸\n\n'
+        texto += '💀 » *LA MOTOSIERRA LO DESPEDAZÓ*\n'
+        texto += '🩸 » @' + user.split('@')[0] + ' fue cortado en pedazos\n'
+        texto += '🪚 » Grupo: ' + metadata.subject + '\n'
+        texto += '☠️ » Sobrevivientes: ' + metadata.participants.length + '\n\n'
+        texto += '> No vuelvas... o Denji irá por ti 🩸'
       }
 
       await conn.sendMessage(id, {
