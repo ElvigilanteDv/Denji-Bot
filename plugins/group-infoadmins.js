@@ -8,7 +8,7 @@ let handler = async (m, { conn, participants, groupMetadata }) => {
   texto += '👑 Creador: @' + owner.split('@')[0] + '\n\n'
 
   for (let admin of admins) {
-    let rol = admin.admin === 'superadmin' ? '👑 Creador' : 🎧 Admin'
+    let rol = admin.admin === 'superadmin' ? '👑 Creador' : '🎧 Admin'
     texto += rol + ': @' + admin.id.split('@')[0] + '\n'
   }
 
