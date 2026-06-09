@@ -1,365 +1,317 @@
-import fetch from 'node-fetch'
-import {
-  generateWAMessageFromContent,
-  prepareWAMessageMedia,
-  proto
-} from '@whiskeysockets/baileys'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import axios from 'axios'
+import { pipeline } from 'stream/promises'
+import { randomUUID } from 'crypto'
 
-global.ttSearchCache = global.ttSearchCache || {}
+const TMP_DIR = path.join(os.tmpdir(), 'denji-tiktok')
+const TMP_FILE_PREFIX = 'denji-tt-'
+const TMP_MAX_AGE_MS = 2 * 60 * 60 * 1000
 
-function getDiamonds(user = {}) {
-  if (typeof user.diamantes === 'number') return user.diamantes
-  if (typeof user.diamond === 'number') return user.diamond
-  return 0
+const REQUEST_TIMEOUT = 60000
+const MAX_VIDEO_BYTES = 80 * 1024 * 1024
+const VIDEO_AS_DOCUMENT_THRESHOLD = 40 * 1024 * 1024
+
+ensureTmpDir()
+cleanupOldTempFiles()
+
+function ensureTmpDir() {
+  try {
+    fs.mkdirSync(TMP_DIR, { recursive: true })
+  } catch {}
 }
 
-function setDiamonds(user = {}, amount = 0) {
-  if (user.diamantes !== undefined) user.diamantes = amount
-  else if (user.diamond !== undefined) user.diamond = amount
-  else user.diamantes = amount
+function cleanupOldTempFiles() {
+  ensureTmpDir()
+  try {
+    const now = Date.now()
+    const files = fs.readdirSync(TMP_DIR)
+
+    for (const file of files) {
+      if (!file.startsWith(TMP_FILE_PREFIX)) continue
+      const fullPath = path.join(TMP_DIR, file)
+      const stat = fs.statSync(fullPath)
+      if (!stat.isFile()) continue
+      if (now - stat.mtimeMs > TMP_MAX_AGE_MS) fs.unlinkSync(fullPath)
+    }
+  } catch {}
 }
 
-function getCacheKey(chat, sender) {
-  return `${chat}:${sender}`
+function deleteFileSafe(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath)
+  } catch {}
 }
 
-function extractTikTokUrl(text = '') {
-  const match = text.match(/https?:\/\/(?:www\.)?(?:vm\.)?tiktok\.com\/[^\s)\]]+/i) ||
-                text.match(/https?:\/\/(?:www\.)?tiktok\.com\/[^\s)\]]+/i)
-  if (!match) return null
-  return match[0].replace(/[\]\)>,.]+$/g, '')
-}
-
-function getSelectedButtonId(m) {
-  const msg = m.message || {}
-
-  const nativeFlow =
-    msg?.interactiveResponseMessage?.nativeFlowResponseMessage || null
-
-  if (nativeFlow?.paramsJson) {
-    try {
-      const params = JSON.parse(nativeFlow.paramsJson || '{}')
-      return (
-        params?.id ||
-        params?.selectedId ||
-        params?.selectedRowId ||
-        params?.single_select_reply?.selected_row_id ||
-        null
-      )
-    } catch {}
-  }
-
-  if (msg?.listResponseMessage?.singleSelectReply?.selectedRowId) {
-    return msg.listResponseMessage.singleSelectReply.selectedRowId
-  }
-
-  if (msg?.buttonsResponseMessage?.selectedButtonId) {
-    return msg.buttonsResponseMessage.selectedButtonId
-  }
-
-  if (msg?.templateButtonReplyMessage?.selectedId) {
-    return msg.templateButtonReplyMessage.selectedId
-  }
-
-  return null
-}
-
-async function sendTikTokMenu(m, conn, usedPrefix, command) {
-  const media = await prepareWAMessageMedia(
-    { image: { url: 'https://files.catbox.moe/r60c8l.jpg' } },
-    { upload: conn.waUploadToServer }
+function safeFileName(name) {
+  return (
+    String(name || 'tiktok')
+      .replace(/[\\/:*?"<>|]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80) || 'tiktok'
   )
+}
 
-  const interactiveMessage = proto.Message.InteractiveMessage.create({
-    header: {
-      title: 'DENJI BOT - TIKTOK',
-      subtitle: 'Busca y descarga videos',
-      hasMediaAttachment: true,
-      imageMessage: media.imageMessage
-    },
-    body: {
-      text:
-        '🩸 DENJI BOT 🩸\n\n' +
-        '🔪 Busca videos en TikTok\n\n' +
-        `> ${usedPrefix + command} <búsqueda>\n` +
-        `> Ejemplo: ${usedPrefix + command} Chaewon\n` +
-        '> 💎 Cuesta 1 diamante por descarga'
-    },
-    footer: { text: '🩸 DENJI BOT 🩸' },
-    nativeFlowMessage: {
-      buttons: [{
-        name: 'single_select',
-        buttonParamsJson: JSON.stringify({
-          title: '🎵 TIKTOK',
-          sections: [{
-            title: '🔍 BUSCAR',
-            rows: [{
-              header: '🎬 VIDEO',
-              title: 'Buscar video',
-              description: '💎 1 diamante | Ejemplo: Chaewon',
-              id: 'tt_example'
-            }]
-          }]
-        })
-      }]
+function normalizeMp4Name(name) {
+  const clean = safeFileName(String(name || 'tiktok').replace(/\.mp4$/i, ''))
+  return `${clean || 'tiktok'}.mp4`
+}
+
+function extractTextFromMessage(message) {
+  return (
+    message?.text ||
+    message?.caption ||
+    message?.body ||
+    message?.conversation ||
+    message?.extendedTextMessage?.text ||
+    message?.imageMessage?.caption ||
+    message?.videoMessage?.caption ||
+    message?.documentMessage?.caption ||
+    message?.message?.conversation ||
+    message?.message?.extendedTextMessage?.text ||
+    message?.message?.imageMessage?.caption ||
+    message?.message?.videoMessage?.caption ||
+    message?.message?.documentMessage?.caption ||
+    ''
+  )
+}
+
+function extractTikTokUrl(text) {
+  const match = String(text || '').match(
+    /https?:\/\/(?:www\.)?(?:tiktok\.com|m\.tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com|douyin\.com)\/[^\s]+/i
+  )
+  return match ? match[0].trim().replace(/[)\],>]+$/g, '') : ''
+}
+
+function resolveTikTokUrl(m, text) {
+  const directText = String(text || '').trim()
+  const quoted = m.quoted || m.msg?.contextInfo?.quotedMessage || null
+  const quotedText = extractTextFromMessage(quoted)
+  return extractTikTokUrl(directText) || extractTikTokUrl(quotedText) || ''
+}
+
+async function readStreamToText(stream) {
+  return await new Promise((resolve, reject) => {
+    let data = ''
+    stream.on('data', chunk => {
+      data += chunk.toString()
+    })
+    stream.on('end', () => resolve(data))
+    stream.on('error', reject)
+  })
+}
+
+async function getTikTokData(videoUrl) {
+  const api = `https://api.delirius.store/download/tiktok?url=${encodeURIComponent(videoUrl)}`
+  const res = await axios.get(api, {
+    timeout: REQUEST_TIMEOUT,
+    validateStatus: () => true,
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Accept': 'application/json,text/plain,*/*'
     }
   })
 
-  const msg = generateWAMessageFromContent(
-    m.chat,
-    { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } },
-    { quoted: m }
+  if (res.status >= 400) {
+    throw new Error(`HTTP ${res.status}`)
+  }
+
+  const json = res.data
+  if (!json?.status || !json?.data?.meta?.media?.[0]?.org) {
+    throw new Error(json?.message || 'No se pudo obtener el video')
+  }
+
+  const title = safeFileName(json?.data?.title || 'tiktok')
+  const directUrl = json.data.meta.media[0].org
+  const fileName = normalizeMp4Name(title)
+
+  return {
+    title,
+    directUrl,
+    fileName,
+    author: json?.data?.author?.nickname || 'Desconocido',
+    duration: json?.data?.duration || 0
+  }
+}
+
+async function downloadFile(url, fileName) {
+  ensureTmpDir()
+
+  const tempPath = path.join(
+    TMP_DIR,
+    `${TMP_FILE_PREFIX}${Date.now()}-${randomUUID()}-${normalizeMp4Name(fileName)}`
   )
 
-  await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
-}
+  const response = await axios.get(url, {
+    responseType: 'stream',
+    timeout: REQUEST_TIMEOUT,
+    maxRedirects: 5,
+    validateStatus: () => true,
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Accept': '*/*',
+      'Referer': 'https://www.tiktok.com/'
+    }
+  })
 
-async function searchTikTok(query) {
-  const url = `https://api.delirius.store/search/tiktoksearch?query=${encodeURIComponent(query)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Error HTTP en búsqueda: ${res.status}`)
-  const json = await res.json()
-
-  if (!json?.status || !Array.isArray(json?.meta) || !json.meta.length) {
-    throw new Error('No se encontraron resultados')
+  if (response.status >= 400) {
+    const errorText = await readStreamToText(response.data).catch(() => '')
+    throw new Error(errorText || `Error HTTP ${response.status}`)
   }
 
-  return json.meta
-}
-
-async function downloadTikTok(url) {
-  const endpoint = `https://api.delirius.store/download/tiktok?url=${encodeURIComponent(url)}`
-  const res = await fetch(endpoint)
-  if (!res.ok) throw new Error(`Error HTTP en descarga: ${res.status}`)
-  const json = await res.json()
-
-  if (!json?.status || !json?.data?.meta?.media?.[0]?.org) {
-    throw new Error('No se pudo descargar')
+  const contentLength = Number(response.headers?.['content-length'] || 0)
+  if (contentLength && contentLength > MAX_VIDEO_BYTES) {
+    throw new Error('El video pesa demasiado para enviarlo por WhatsApp')
   }
 
-  return json
-}
+  let downloaded = 0
+  response.data.on('data', chunk => {
+    downloaded += chunk.length
+    if (downloaded > MAX_VIDEO_BYTES) {
+      response.data.destroy(new Error('El video pesa demasiado para enviarlo por WhatsApp'))
+    }
+  })
 
-let handler = async (m, { conn, text, usedPrefix, command }) => {
-  const who = m.sender
-  let user = global.db.data.users[who]
+  await pipeline(response.data, fs.createWriteStream(tempPath))
 
-  if (!user) {
-    global.db.data.users[who] = { diamantes: 0 }
-    user = global.db.data.users[who]
+  if (!fs.existsSync(tempPath)) {
+    throw new Error('No se pudo guardar el video')
   }
 
-  if (!text) {
-    await sendTikTokMenu(m, conn, usedPrefix, command)
+  const size = fs.statSync(tempPath).size
+  if (!size || size < 100000) {
+    deleteFileSafe(tempPath)
+    throw new Error('El archivo descargado es inválido')
+  }
+
+  return { tempPath, size }
+}
+
+async function sendTikTokVideo(conn, chat, quoted, { filePath, fileName, title, size, author, duration }) {
+  const buffer = fs.readFileSync(filePath)
+
+  const caption =
+    `⛓️ DENJI BOT ⛓️\n\n` +
+    `⚡ *TIKTOK DESCARGADO*\n` +
+    `🎬 *Título:* ${title}\n` +
+    `👤 *Autor:* ${author}\n` +
+    `⏱️ *Duración:* ${duration}s\n` +
+    `💾 *Peso:* ${(size / 1024 / 1024).toFixed(2)} MB\n\n` +
+    `> A la orden, soy Denji ⛓️`
+
+  if (size > VIDEO_AS_DOCUMENT_THRESHOLD) {
+    await conn.sendMessage(chat, {
+      document: buffer,
+      mimetype: 'video/mp4',
+      fileName,
+      caption: caption + '\n\n📦 Enviado como documento por peso.'
+    }, { quoted })
     return
   }
-
-  const rawText = text.trim()
-  const directUrl = extractTikTokUrl(rawText)
-
-  if (directUrl) {
-    const currentDiamonds = getDiamonds(user)
-    if (currentDiamonds < 1) {
-      return conn.sendMessage(m.chat, {
-        text:
-          '🩸 DENJI BOT 🩸\n\n' +
-          '💀 No tienes suficientes diamantes\n\n' +
-          '> Necesitas: 1 diamante\n' +
-          `> Tienes: ${currentDiamonds} diamantes\n\n` +
-          '> Usa #work para ganar'
-      }, { quoted: m })
-    }
-
-    await m.react('⚰️')
-
-    try {
-      console.log('TT DIRECT URL =>', directUrl)
-      const json = await downloadTikTok(directUrl)
-      const newTotal = currentDiamonds - 1
-      setDiamonds(user, newTotal)
-
-      const videoUrl = json.data.meta.media[0].org
-
-      await conn.sendMessage(m.chat, {
-        video: { url: videoUrl },
-        caption:
-          '🩸 DENJI BOT 🩸\n\n' +
-          '🔪 Descarga completada\n\n' +
-          `💀 Video: ${json.data.title || ''}\n` +
-          `💀 Autor: ${json.data.author?.nickname || ''}\n` +
-          `💀 Duración: ${json.data.duration || 0}s\n` +
-          `🩸 Diamantes restantes: ${newTotal}`
-      }, { quoted: m })
-
-      await m.react('🩸')
-    } catch (e) {
-      console.log('TT DIRECT ERROR =>', e)
-      await m.react('💀')
-      await conn.sendMessage(m.chat, {
-        text: '🩸 DENJI BOT 🩸\n\n💀 Error al descargar'
-      }, { quoted: m })
-    }
-
-    return
-  }
-
-  await m.react('🩸')
 
   try {
-    const resultados = (await searchTikTok(rawText)).slice(0, 10)
-    const primeraImagen = resultados[0]?.author?.avatar || ''
-    const cacheKey = getCacheKey(m.chat, m.sender)
+    await conn.sendMessage(chat, {
+      video: buffer,
+      mimetype: 'video/mp4',
+      fileName,
+      caption
+    }, { quoted })
+  } catch {
+    await conn.sendMessage(chat, {
+      document: buffer,
+      mimetype: 'video/mp4',
+      fileName,
+      caption: caption + '\n\n📦 Enviado como documento por compatibilidad.'
+    }, { quoted })
+  }
+}
 
-    global.ttSearchCache[cacheKey] = {
-      query: rawText,
-      results: resultados,
-      createdAt: Date.now()
-    }
+let handler = async (m, { conn, text }) => {
+  let user = global.db.data.users[m.sender]
+  if (!user) {
+    global.db.data.users[m.sender] = { diamantes: 0 }
+    user = global.db.data.users[m.sender]
+  }
 
-    let media = null
-    if (primeraImagen) {
-      media = await prepareWAMessageMedia(
-        { image: { url: primeraImagen } },
-        { upload: conn.waUploadToServer }
-      )
-    }
+  const diamonds = user.diamantes || user.diamond || 0
+  const videoUrl = resolveTikTokUrl(m, text)
 
-    const rows = resultados.map((video, i) => ({
-      header: '🎬 ' + (video.author?.nickname || video.author?.username || 'Desconocido'),
-      title: (video.title || 'Sin título').substring(0, 35),
-      description: `⏱️ ${video.duration || '?'}s | ❤️ ${video.like?.toLocaleString?.() || '?'}`,
-      id: `ttdl_${i}`
-    }))
-
-    const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: {
-        title: 'DENJI BOT - TIKTOK',
-        subtitle: 'Selecciona un video',
-        hasMediaAttachment: !!media,
-        imageMessage: media ? media.imageMessage : undefined
-      },
-      body: {
-        text:
-          '🩸 DENJI BOT 🩸\n\n' +
-          `🔪 Búsqueda: ${rawText}\n\n` +
-          '> Elige un video\n' +
-          '> 💎 1 diamante al descargar'
-      },
-      footer: { text: '🩸 DENJI BOT 🩸' },
-      nativeFlowMessage: {
-        buttons: [{
-          name: 'single_select',
-          buttonParamsJson: JSON.stringify({
-            title: '🎬 RESULTADOS',
-            sections: [{
-              title: '📋 ' + rawText.toUpperCase(),
-              rows
-            }]
-          })
-        }]
-      }
-    })
-
-    const msg = generateWAMessageFromContent(
-      m.chat,
-      { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } },
-      { quoted: m }
-    )
-
-    await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
-  } catch (e) {
-    console.log('TT SEARCH ERROR =>', e)
-    await m.react('💀')
-    await conn.sendMessage(m.chat, {
-      text: '🩸 DENJI BOT 🩸\n\n💀 No se encontraron resultados'
+  if (!videoUrl) {
+    return conn.sendMessage(m.chat, {
+      text:
+        `⛓️ DENJI BOT ⛓️\n\n` +
+        `⚡ *USO CORRECTO*\n` +
+        `🔗 .tt <link de TikTok>\n` +
+        `🔗 .tt respondiendo a un mensaje con link\n\n` +
+        `💎 Cuesta 1 diamante por descarga\n` +
+        `> A la orden, soy Denji ⛓️`
     }, { quoted: m })
   }
-}
 
-handler.before = async (m, { conn }) => {
-  const selectedId = getSelectedButtonId(m)
-  if (!selectedId || !selectedId.startsWith('ttdl_')) return false
+  if (diamonds < 1) {
+    return conn.sendMessage(m.chat, {
+      text:
+        `⛓️ DENJI BOT ⛓️\n\n` +
+        `💀 No tienes suficientes diamantes\n\n` +
+        `💎 Necesitas: 1 diamante\n` +
+        `🩸 Tienes: ${diamonds} diamantes\n\n` +
+        `> Usa #work para ganar`
+    }, { quoted: m })
+  }
+
+  let tempPath = null
+  const oldDiamonds = diamonds
 
   try {
-    const index = Number(selectedId.replace('ttdl_', ''))
-    if (Number.isNaN(index)) return false
-
-    const who = m.sender
-    let user = global.db.data.users[who]
-
-    if (!user) {
-      global.db.data.users[who] = { diamantes: 0, diamond: 0 }
-      user = global.db.data.users[who]
-    }
-
-    const cacheKey = getCacheKey(m.chat, m.sender)
-    const cache = global.ttSearchCache[cacheKey]
-
-    if (!cache || !Array.isArray(cache.results) || !cache.results[index]) {
-      await conn.sendMessage(m.chat, {
-        text:
-          '🩸 DENJI BOT 🩸\n\n' +
-          '💀 La búsqueda expiró o no encontré ese resultado\n\n' +
-          '> Haz la búsqueda otra vez'
-      }, { quoted: m })
-      return true
-    }
-
-    const misDiamantes = getDiamonds(user)
-    if (misDiamantes < 1) {
-      await conn.sendMessage(m.chat, {
-        text:
-          '🩸 DENJI BOT 🩸\n\n' +
-          '💀 No tienes 1 diamante\n\n' +
-          '> Usa #work para ganar'
-      }, { quoted: m })
-      return true
-    }
-
-    const selectedVideo = cache.results[index]
-    const selectedVideoUrl = selectedVideo.url
-    const fallbackTitle = selectedVideo.title || 'Sin título'
-
-    setDiamonds(user, misDiamantes - 1)
-
     await m.react('⚰️')
+
+    user.diamantes = oldDiamonds - 1
+
     await conn.sendMessage(m.chat, {
       text:
-        '🩸 DENJI BOT 🩸\n\n' +
-        '🔪 Descargando...\n' +
-        '💎 -1 diamante'
+        `⛓️ DENJI BOT ⛓️\n\n` +
+        `⚡ *DESCARGANDO TIKTOK...*\n` +
+        `💎 -1 diamante\n\n` +
+        `> Espera un momento ⛓️`
     }, { quoted: m })
 
-    const json = await downloadTikTok(selectedVideoUrl)
-    const total = getDiamonds(user)
-    const videoDownloadUrl = json.data.meta.media[0].org
+    const meta = await getTikTokData(videoUrl)
+    const downloaded = await downloadFile(meta.directUrl, meta.fileName)
 
-    await conn.sendMessage(m.chat, {
-      video: { url: videoDownloadUrl },
-      caption:
-        '🩸 DENJI BOT 🩸\n\n' +
-        '🔪 Descarga completada\n\n' +
-        `💀 Video: ${json.data.title || fallbackTitle}\n` +
-        `💀 Autor: ${json.data.author?.nickname || selectedVideo.author?.nickname || ''}\n` +
-        `💀 Duración: ${json.data.duration || selectedVideo.duration || 0}s\n` +
-        `🩸 Diamantes restantes: ${total}`
-    }, { quoted: m })
+    tempPath = downloaded.tempPath
+
+    await sendTikTokVideo(conn, m.chat, m, {
+      filePath: downloaded.tempPath,
+      fileName: meta.fileName,
+      title: meta.title,
+      size: downloaded.size,
+      author: meta.author,
+      duration: meta.duration
+    })
 
     await m.react('🩸')
-    return true
   } catch (e) {
-    console.log('TT BEFORE ERROR =>', e)
-    await conn.sendMessage(m.chat, {
-      text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message
-    }, { quoted: m })
+    console.log('DENJI TT ERROR =>', e)
+
+    user.diamantes = oldDiamonds
+
     await m.react('💀')
-    return true
+    await conn.sendMessage(m.chat, {
+      text:
+        `⛓️ DENJI BOT ⛓️\n\n` +
+        `💀 Error al procesar el video\n\n` +
+        `⚠️ ${e.message || 'No se pudo descargar'}`
+    }, { quoted: m })
+  } finally {
+    deleteFileSafe(tempPath)
   }
 }
 
-handler.help = ['tiktok', 'tt']
+handler.help = ['tt', 'tiktok']
 handler.tags = ['downloader']
-handler.command = /^(tiktok|tt)$/i
-handler.desc = 'Busca y descarga videos de TikTok 💎1'
+handler.command = /^(tt|tiktok)$/i
+handler.desc = 'Descarga videos de TikTok por link'
 
 export default handler
