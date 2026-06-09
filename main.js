@@ -19,7 +19,7 @@ import NodeCache from 'node-cache';
 import qrcode from 'qrcode-terminal';
 import { spawn } from 'child_process';
 import { setInterval } from 'timers';
-
+import 'dotenv/config'
 process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1';
 process.env.TMPDIR = path.join(process.cwd(), 'tmp');
 
