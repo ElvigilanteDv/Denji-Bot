@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 const execPromise = promisify(exec)
+const searchCache = new Map()
 
 function isWebp(buffer) {
   return buffer?.slice(0, 4).toString() === 'RIFF' &&
@@ -56,20 +57,14 @@ async function toWhatsAppSticker(url) {
     if (isWebp(buffer)) {
       try {
         await convertToSticker(input, output)
-        if (await fileExists(output)) {
-          return await readFile(output)
-        }
+        if (await fileExists(output)) return await readFile(output)
       } catch {
         return buffer
       }
     }
 
     await convertToSticker(input, output)
-
-    if (!(await fileExists(output))) {
-      throw new Error('No se pudo convertir el sticker')
-    }
-
+    if (!(await fileExists(output))) throw new Error('No se pudo convertir el sticker')
     return await readFile(output)
   } finally {
     await unlink(input).catch(() => {})
@@ -77,16 +72,51 @@ async function toWhatsAppSticker(url) {
   }
 }
 
-let handler = async (m, { conn, text, usedPrefix, command }) => {
-  const query = text?.trim()
+async function searchStickerPacks(query) {
+  const res = await fetch(`https://api.delirius.store/tools/stickerpack?query=${encodeURIComponent(query)}&page=0`)
+  const json = await res.json()
 
-  if (!query) {
+  if (!json.status || !json.data) {
+    throw new Error('No se encontraron resultados')
+  }
+
+  const data = Array.isArray(json.data) ? json.data : [json.data]
+  return data
+}
+
+async function sendChoiceMenu(conn, chat, quoted, packs, usedPrefix, command) {
+  const top = packs.slice(0, 3)
+
+  let txt =
+    `⛓️ DENJI BOT ⛓️\n\n` +
+    `🩸 *PACKS ENCONTRADOS*\n\n`
+
+  top.forEach((p, i) => {
+    txt += `⚰️ *${i + 1}.* ${p.title || 'Sin título'}\n`
+    txt += `👤 Autor: ${p.username || 'Desconocido'}\n`
+    txt += `📦 Stickers: ${p.total || p.stickers?.length || 0}\n\n`
+  })
+
+  txt += `🔪 *Elige uno respondiendo con:*\n`
+  txt += `${usedPrefix}${command} 1\n`
+  txt += `${usedPrefix}${command} 2\n`
+  txt += `${usedPrefix}${command} 3\n\n`
+  txt += `> Escoge tu carnicería ⛓️`
+
+  await conn.sendMessage(chat, { text: txt }, { quoted })
+}
+
+let handler = async (m, { conn, text, usedPrefix, command }) => {
+  const input = text?.trim()
+  const userKey = `${m.sender}:${command}`
+
+  if (!input) {
     return conn.sendMessage(m.chat, {
       text:
         `⛓️ DENJI BOT ⛓️\n\n` +
         `🩸 *PACK DE STICKERS*\n\n` +
-        `⚡ Descarga packs de stickers con estilo sangriento.\n\n` +
-        `🔗 *Uso:*\n` +
+        `🔎 Busca packs y elige cuál quieres arrancar.\n\n` +
+        `⚡ *Uso:*\n` +
         `${usedPrefix}${command} <tema>\n\n` +
         `🔪 *Ejemplo:*\n` +
         `${usedPrefix}${command} anime\n\n` +
@@ -94,70 +124,108 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     }, { quoted: m })
   }
 
-  await m.react('🔍')
+  const isSelection = /^\d+$/.test(input)
 
   try {
-    const res = await fetch(`https://api.delirius.store/tools/stickerpack?query=${encodeURIComponent(query)}&page=0`)
-    const json = await res.json()
+    if (!isSelection) {
+      await m.react('🔍')
 
-    if (!json.status || !json.data) {
+      const packs = await searchStickerPacks(input)
+      const top = packs.slice(0, 3)
+
+      if (!top.length) {
+        await m.react('💀')
+        return conn.sendMessage(m.chat, {
+          text:
+            `⛓️ DENJI BOT ⛓️\n\n` +
+            `💀 No encontré packs con ese tema.\n\n` +
+            `> Prueba con otra búsqueda ⛓️`
+        }, { quoted: m })
+      }
+
+      searchCache.set(userKey, {
+        expires: Date.now() + 5 * 60 * 1000,
+        packs: top
+      })
+
+      await sendChoiceMenu(conn, m.chat, m, top, usedPrefix, command)
+      await m.react('🩸')
+      return
+    }
+
+    const cached = searchCache.get(userKey)
+
+    if (!cached || cached.expires < Date.now()) {
+      searchCache.delete(userKey)
       await m.react('💀')
       return conn.sendMessage(m.chat, {
         text:
           `⛓️ DENJI BOT ⛓️\n\n` +
-          `💀 No encontré ningún pack con ese tema.\n\n` +
-          `⚠️ Prueba con otra palabra.\n` +
-          `> La motosierra sigue hambrienta... ⛓️`
+          `💀 Tu selección expiró.\n\n` +
+          `🔎 Haz la búsqueda otra vez.\n` +
+          `> La sangre se enfrió... ⛓️`
       }, { quoted: m })
     }
 
-    const { title, username, total, stickers } = json.data
+    const index = Number(input) - 1
+    const selected = cached.packs[index]
+
+    if (!selected) {
+      await m.react('💀')
+      return conn.sendMessage(m.chat, {
+        text:
+          `⛓️ DENJI BOT ⛓️\n\n` +
+          `💀 Opción inválida.\n\n` +
+          `⚠️ Elige 1, 2 o 3.\n` +
+          `> No cortes donde no es ⛓️`
+      }, { quoted: m })
+    }
 
     await conn.sendMessage(m.chat, {
       text:
         `⛓️ DENJI BOT ⛓️\n\n` +
-        `🩸 *PACK ENCONTRADO*\n` +
-        `🎴 *Pack:* ${title}\n` +
-        `👤 *Autor:* ${username}\n` +
-        `📦 *Total:* ${total} stickers\n\n` +
-        `⚡ Enviando hasta 10 stickers...\n` +
-        `> Que empiece la carnicería ⛓️`
+        `⚰️ *PACK SELECCIONADO*\n` +
+        `🎴 *Pack:* ${selected.title || 'Sin título'}\n` +
+        `👤 *Autor:* ${selected.username || 'Desconocido'}\n` +
+        `📦 *Total:* ${selected.total || selected.stickers?.length || 0}\n\n` +
+        `🩸 Enviando hasta 10 stickers...\n` +
+        `> Que empiece la masacre ⛓️`
     }, { quoted: m })
 
     await m.react('⏳')
 
     let enviados = 0
-
-    for (const url of stickers.slice(0, 10)) {
+    for (const url of (selected.stickers || []).slice(0, 10)) {
       try {
         const stickerBuffer = await toWhatsAppSticker(url)
         await conn.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m })
         enviados++
       } catch (e) {
-        console.log('DENJI STICKER ERROR =>', e?.message || e)
+        console.log('DENJI SPACK ERROR =>', e?.message || e)
       }
     }
 
-    if (enviados === 0) {
+    searchCache.delete(userKey)
+
+    if (!enviados) {
       await m.react('💀')
       return conn.sendMessage(m.chat, {
         text:
           `⛓️ DENJI BOT ⛓️\n\n` +
-          `💀 Encontré el pack, pero los stickers salieron dañados o incompatibles.\n\n` +
-          `⚠️ Intenta con otro pack.\n` +
-          `> Ni la motosierra pudo salvarlos...`
+          `💀 El pack salió corrupto o incompatible.\n\n` +
+          `> Ni Denji pudo salvarlo... ⛓️`
       }, { quoted: m })
     }
 
-    await m.react('✅')
+    await m.react('🩸')
 
     await conn.sendMessage(m.chat, {
       text:
         `⛓️ DENJI BOT ⛓️\n\n` +
-        `🩸 *MATANZA COMPLETADA*\n` +
-        `🎴 *Pack:* ${title}\n` +
+        `🩸 *CARNICERÍA COMPLETADA*\n` +
+        `🎴 *Pack:* ${selected.title || 'Sin título'}\n` +
         `✅ *Enviados:* ${enviados} stickers\n\n` +
-        `> Denji terminó el trabajo ⛓️`
+        `> Denji dejó todo bañado en sangre ⛓️`
     }, { quoted: m })
 
   } catch (e) {
@@ -165,9 +233,9 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     await conn.sendMessage(m.chat, {
       text:
         `⛓️ DENJI BOT ⛓️\n\n` +
-        `💀 Error al obtener el pack de stickers.\n\n` +
+        `💀 Error al buscar o enviar stickers.\n\n` +
         `⚠️ ${String(e.message || e).slice(0, 200)}\n\n` +
-        `> Algo se hizo pedazos... ⛓️`
+        `> Algo se despedazó en el camino... ⛓️`
     }, { quoted: m })
   }
 }
@@ -175,6 +243,6 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 handler.help = ['spack']
 handler.tags = ['downloader']
 handler.command = /^spack$/i
-handler.desc = 'Descarga packs de stickers estilo Denji'
+handler.desc = 'Busca packs de stickers y permite elegir uno'
 
 export default handler
