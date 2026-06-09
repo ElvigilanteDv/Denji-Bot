@@ -23,6 +23,13 @@ function getCacheKey(chat, sender) {
   return `${chat}:${sender}`
 }
 
+function extractTikTokUrl(text = '') {
+  const match = text.match(/https?:\/\/(?:www\.)?(?:vm\.)?tiktok\.com\/[^\s)\]]+/i) ||
+                text.match(/https?:\/\/(?:www\.)?tiktok\.com\/[^\s)\]]+/i)
+  if (!match) return null
+  return match[0].replace(/[\]\)>,.]+$/g, '')
+}
+
 function getSelectedButtonId(m) {
   const msg = m.message || {}
 
@@ -147,10 +154,10 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     return
   }
 
-  const query = text.trim()
-  const isDirectLink = query.includes('tiktok.com') || query.includes('vm.tiktok.com')
+  const rawText = text.trim()
+  const directUrl = extractTikTokUrl(rawText)
 
-  if (isDirectLink) {
+  if (directUrl) {
     const currentDiamonds = getDiamonds(user)
     if (currentDiamonds < 1) {
       return conn.sendMessage(m.chat, {
@@ -166,7 +173,8 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     await m.react('⚰️')
 
     try {
-      const json = await downloadTikTok(query)
+      console.log('TT DIRECT URL =>', directUrl)
+      const json = await downloadTikTok(directUrl)
       const newTotal = currentDiamonds - 1
       setDiamonds(user, newTotal)
 
@@ -198,12 +206,12 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   await m.react('🩸')
 
   try {
-    const resultados = (await searchTikTok(query)).slice(0, 10)
+    const resultados = (await searchTikTok(rawText)).slice(0, 10)
     const primeraImagen = resultados[0]?.author?.avatar || ''
     const cacheKey = getCacheKey(m.chat, m.sender)
 
     global.ttSearchCache[cacheKey] = {
-      query,
+      query: rawText,
       results: resultados,
       createdAt: Date.now()
     }
@@ -233,7 +241,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       body: {
         text:
           '🩸 DENJI BOT 🩸\n\n' +
-          `🔪 Búsqueda: ${query}\n\n` +
+          `🔪 Búsqueda: ${rawText}\n\n` +
           '> Elige un video\n' +
           '> 💎 1 diamante al descargar'
       },
@@ -244,7 +252,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
           buttonParamsJson: JSON.stringify({
             title: '🎬 RESULTADOS',
             sections: [{
-              title: '📋 ' + query.toUpperCase(),
+              title: '📋 ' + rawText.toUpperCase(),
               rows
             }]
           })
@@ -271,9 +279,6 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 handler.before = async (m, { conn }) => {
   const selectedId = getSelectedButtonId(m)
   if (!selectedId || !selectedId.startsWith('ttdl_')) return false
-
-  console.log('TT SELECTED ID =>', selectedId)
-  console.log('TT MESSAGE TYPE =>', Object.keys(m.message || {}))
 
   try {
     const index = Number(selectedId.replace('ttdl_', ''))
