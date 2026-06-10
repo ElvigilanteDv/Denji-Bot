@@ -569,7 +569,6 @@ console.log(chalk.bold.red('   🪚 DENJI BOT - LISTO PARA CORTAR 🩸'));
 console.log(chalk.bold.red('   「El matadero está abierto, nadie escapa」'));
 console.log(chalk.bold.red('🩸'.repeat(20) + '\n'));
 conn.ev.on('group-participants.update', async ({ id, participants, action }) => {
-  console.log('📢 group-participants.update:', id, action, participants)
   try {
     const botNumber = conn.user?.jid || 'bot'
     let settings = {}
