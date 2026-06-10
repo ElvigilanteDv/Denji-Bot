@@ -88,7 +88,6 @@ const handler = async (m, { conn, command, args }) => {
   const chatId = m.chat
   const chat = getChatConfig(botNumber, chatId)
 
-  // modoadmin se lee de global.db para que el handler.js lo detecte
   const modoadminActual = global.db.data.chats[m.chat]?.modoadmin || false
 
   if (/^(on|off)$/i.test(command)) {
@@ -116,7 +115,6 @@ ${modoadminActual ? '✅' : '❌'} modoadmin
       }, { quoted: m })
     }
 
-    // modoadmin se guarda en global.db, el resto en settings.json
     if (type === 'modoadmin') {
       global.db.data.chats[m.chat].modoadmin = enable
       global.markDatabaseModified()
@@ -281,5 +279,28 @@ handler.tags = ['group']
 handler.command = /^(on|off|antilink|resetwarn)$/i
 handler.group = true
 handler.admin = true
+
+handler.before = async (m, { conn }) => {
+  if (!m.isGroup) return
+
+  const botNumber = conn.user?.jid || 'bot'
+  const chat = getChatConfig(botNumber, m.chat)
+
+  if (chat.antiarabe && m.messageStubType === 27) {
+    const newJid = m.messageStubParameters?.[0]
+    if (!newJid) return
+    if (newJid.endsWith('@lid')) return 
+
+    const number = newJid.split('@')[0].replace(/\D/g, '')
+    const arabicPrefixes = ['212', '20', '971', '965', '966', '974', '973', '962']
+    const isArab = arabicPrefixes.some(prefix => number.startsWith(prefix))
+
+    if (isArab) {
+      await conn.sendMessage(m.chat, { text: `Este pndj ${newJid} será expulsado, no queremos العرب aca, adiosito. [ Anti Arabe Activado ]` })
+      await conn.groupParticipantsUpdate(m.chat, [newJid], 'remove')
+      return true
+    }
+  }
+}
 
 export default handler
