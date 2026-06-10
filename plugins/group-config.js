@@ -88,6 +88,7 @@ const handler = async (m, { conn, command, args }) => {
   const chatId = m.chat
   const chat = getChatConfig(botNumber, chatId)
 
+  // modoadmin se lee de global.db para que el handler.js lo detecte
   const modoadminActual = global.db.data.chats[m.chat]?.modoadmin || false
 
   if (/^(on|off)$/i.test(command)) {
@@ -115,6 +116,7 @@ ${modoadminActual ? '✅' : '❌'} modoadmin
       }, { quoted: m })
     }
 
+    // modoadmin se guarda en global.db, el resto en settings.json
     if (type === 'modoadmin') {
       global.db.data.chats[m.chat].modoadmin = enable
       global.markDatabaseModified()
@@ -280,22 +282,11 @@ handler.command = /^(on|off|antilink|resetwarn)$/i
 handler.group = true
 handler.admin = true
 
-const linkRegex = /chat\.whatsapp\.com\/[0-9A-Za-z]{20,24}/i
-const linkRegex1 = /whatsapp\.com\/channel\/[0-9A-Za-z]{20,24}/i
-
 handler.before = async (m, { conn }) => {
   if (!m.isGroup) return
-  if (!global.db.data.chats[m.chat]) global.db.data.chats[m.chat] = {}
 
   const botNumber = conn.user?.jid || 'bot'
-  const chatId = m.chat
-  const chat = getChatConfig(botNumber, chatId)
-
-  if (chat.modoadmin) {
-    const groupMetadata = await conn.groupMetadata(m.chat)
-    const isUserAdmin = groupMetadata.participants.find(p => p.id === m.sender)?.admin
-    if (!isUserAdmin && !m.fromMe) return
-  }
+  const chat = getChatConfig(botNumber, m.chat)
 
   if (chat.antiarabe && m.messageStubType === 27) {
     const newJid = m.messageStubParameters?.[0]
@@ -306,83 +297,8 @@ handler.before = async (m, { conn }) => {
     const isArab = arabicPrefixes.some(prefix => number.startsWith(prefix))
 
     if (isArab) {
-      await conn.sendMessage(m.chat, {
-        text: `⛓️ *DENJI BOT* ⛓️\n\n🩸 *ANTI-ÁRABE ACTIVADO*\n☠️ El número +${number} no es bienvenido aquí.\n🔪 Expulsado del matadero.`
-      })
+      await conn.sendMessage(m.chat, { text: `Este pndj ${newJid} será expulsado, no queremos العرب aca, adiosito. [ Anti Arabe Activado ]` })
       await conn.groupParticipantsUpdate(m.chat, [newJid], 'remove')
-      return true
-    }
-  }
-
-  if (chat.antilink) {
-    const groupMetadata = await conn.groupMetadata(m.chat)
-    const isUserAdmin = groupMetadata.participants.find(p => p.id === m.sender)?.admin
-    const text = m?.text || ''
-
-    if (!isUserAdmin && (linkRegex.test(text) || linkRegex1.test(text))) {
-      const userTag = `@${m.sender.split('@')[0]}`
-      const delet = m.key.participant
-      const msgID = m.key.id
-
-      try {
-        const ownGroupLink = `https://chat.whatsapp.com/${await conn.groupInviteCode(m.chat)}`
-        if (text.includes(ownGroupLink)) return
-      } catch { }
-
-      if (!chat.antilinkWarnings) chat.antilinkWarnings = {}
-      if (!chat.antilinkWarnings[m.sender]) chat.antilinkWarnings[m.sender] = 0
-
-      chat.antilinkWarnings[m.sender]++
-
-      if (chat.antilinkWarnings[m.sender] < 3) {
-        try {
-          await conn.sendMessage(m.chat, {
-            text: `🚫 Hey ${userTag}, no se permiten links aquí. Esta es tu advertencia ${chat.antilinkWarnings[m.sender]}/3.`,
-            mentions: [m.sender]
-          }, { quoted: m })
-
-          await conn.sendMessage(m.chat, {
-            delete: {
-              remoteJid: m.chat,
-              fromMe: false,
-              id: msgID,
-              participant: delet
-            }
-          })
-        } catch {
-          await conn.sendMessage(m.chat, {
-            text: `⚠️ No pude eliminar el mensaje de ${userTag}.`,
-            mentions: [m.sender]
-          }, { quoted: m })
-        }
-      } else {
-        try {
-          await conn.sendMessage(m.chat, {
-            text: `🚫 ${userTag} alcanzó 3 advertencias por enviar links. Ahora serás expulsado.`,
-            mentions: [m.sender]
-          }, { quoted: m })
-
-          await conn.sendMessage(m.chat, {
-            delete: {
-              remoteJid: m.chat,
-              fromMe: false,
-              id: msgID,
-              participant: delet
-            }
-          })
-
-          await conn.groupParticipantsUpdate(m.chat, [m.sender], 'remove')
-
-          chat.antilinkWarnings[m.sender] = 0
-        } catch {
-          await conn.sendMessage(m.chat, {
-            text: `⚠️ No pude expulsar a ${userTag}. Puede que no tenga permisos.`,
-            mentions: [m.sender]
-          }, { quoted: m })
-        }
-      }
-
-      updateChatConfig(botNumber, chatId, { antilinkWarnings: chat.antilinkWarnings })
       return true
     }
   }
