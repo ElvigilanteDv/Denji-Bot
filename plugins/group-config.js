@@ -280,15 +280,18 @@ handler.command = /^(on|off|antilink|resetwarn)$/i
 handler.group = true
 handler.admin = true
 
+const linkRegex = /chat\.whatsapp\.com\/[0-9A-Za-z]{20,24}/i
+const linkRegex1 = /whatsapp\.com\/channel\/[0-9A-Za-z]{20,24}/i
+
 handler.before = async (m, { conn }) => {
   if (!m.isGroup) return
+  if (!global.db.data.chats[m.chat]) global.db.data.chats[m.chat] = {}
 
   const botNumber = conn.user?.jid || 'bot'
   const chatId = m.chat
   const chat = getChatConfig(botNumber, chatId)
 
-  const modoadminActual = global.db.data.chats?.[m.chat]?.modoadmin || false
-  if (modoadminActual) {
+  if (chat.modoadmin) {
     const groupMetadata = await conn.groupMetadata(m.chat)
     const isUserAdmin = groupMetadata.participants.find(p => p.id === m.sender)?.admin
     if (!isUserAdmin && !m.fromMe) return
@@ -304,14 +307,7 @@ handler.before = async (m, { conn }) => {
 
     if (isArab) {
       await conn.sendMessage(m.chat, {
-        text:
-`⛓️ *DENJI BOT* ⛓️
-
-🩸 *ANTI-ÁRABE ACTIVADO*
-☠️ El número +${number} no es bienvenido aquí.
-🔪 Expulsado del matadero.
-
-> [ Anti Árabe activado ]`
+        text: `⛓️ *DENJI BOT* ⛓️\n\n🩸 *ANTI-ÁRABE ACTIVADO*\n☠️ El número +${number} no es bienvenido aquí.\n🔪 Expulsado del matadero.`
       })
       await conn.groupParticipantsUpdate(m.chat, [newJid], 'remove')
       return true
@@ -323,9 +319,6 @@ handler.before = async (m, { conn }) => {
     const isUserAdmin = groupMetadata.participants.find(p => p.id === m.sender)?.admin
     const text = m?.text || ''
 
-    const linkRegex = /chat\.whatsapp\.com\/[0-9A-Za-z]{20,24}/i
-    const linkRegex1 = /whatsapp\.com\/channel\/[0-9A-Za-z]{20,24}/i
-
     if (!isUserAdmin && (linkRegex.test(text) || linkRegex1.test(text))) {
       const userTag = `@${m.sender.split('@')[0]}`
       const delet = m.key.participant
@@ -336,11 +329,18 @@ handler.before = async (m, { conn }) => {
         if (text.includes(ownGroupLink)) return
       } catch { }
 
-      const mode = chat.antilinkMode || 'delete'
-      const warnLimit = chat.antilinkWarnLimit || 3
+      if (!chat.antilinkWarnings) chat.antilinkWarnings = {}
+      if (!chat.antilinkWarnings[m.sender]) chat.antilinkWarnings[m.sender] = 0
 
-      const deleteMsg = async () => {
+      chat.antilinkWarnings[m.sender]++
+
+      if (chat.antilinkWarnings[m.sender] < 3) {
         try {
+          await conn.sendMessage(m.chat, {
+            text: `🚫 Hey ${userTag}, no se permiten links aquí. Esta es tu advertencia ${chat.antilinkWarnings[m.sender]}/3.`,
+            mentions: [m.sender]
+          }, { quoted: m })
+
           await conn.sendMessage(m.chat, {
             delete: {
               remoteJid: m.chat,
@@ -349,68 +349,40 @@ handler.before = async (m, { conn }) => {
               participant: delet
             }
           })
-        } catch { }
-      }
-
-      if (mode === 'delete') {
-        await deleteMsg()
-        await conn.sendMessage(m.chat, {
-          text:
-`⛓️ *DENJI BOT* ⛓️
-
-🔪 *LINK ELIMINADO*
-🩸 ${userTag}, los links están prohibidos aquí.`,
-          mentions: [m.sender]
-        }, { quoted: m })
-
+        } catch {
+          await conn.sendMessage(m.chat, {
+            text: `⚠️ No pude eliminar el mensaje de ${userTag}.`,
+            mentions: [m.sender]
+          }, { quoted: m })
+        }
       } else {
-        const settings = readSettings()
-        if (!settings[botNumber]) settings[botNumber] = {}
-        if (!settings[botNumber][chatId]) settings[botNumber][chatId] = getDefaultConfig()
-        if (!settings[botNumber][chatId].antilinkWarnings) settings[botNumber][chatId].antilinkWarnings = {}
-        if (!settings[botNumber][chatId].antilinkWarnings[m.sender]) settings[botNumber][chatId].antilinkWarnings[m.sender] = 0
-
-        settings[botNumber][chatId].antilinkWarnings[m.sender]++
-        const warns = settings[botNumber][chatId].antilinkWarnings[m.sender]
-        saveSettings(settings)
-
-        await deleteMsg()
-
-        if (warns < warnLimit) {
+        try {
           await conn.sendMessage(m.chat, {
-            text:
-`⛓️ *DENJI BOT* ⛓️
-
-🩸 *ADVERTENCIA ${warns}/${warnLimit}*
-🔪 ${userTag}, no se permiten links en el matadero.
-☠️ A la advertencia ${warnLimit} serás expulsado.`,
-            mentions: [m.sender]
-          }, { quoted: m })
-        } else {
-          await conn.sendMessage(m.chat, {
-            text:
-`⛓️ *DENJI BOT* ⛓️
-
-☠️ *EJECUTADO DEL MATADERO*
-🩸 ${userTag} alcanzó ${warnLimit} advertencias por enviar links.
-🔪 No hay misericordia aquí.`,
+            text: `🚫 ${userTag} alcanzó 3 advertencias por enviar links. Ahora serás expulsado.`,
             mentions: [m.sender]
           }, { quoted: m })
 
-          try {
-            await conn.groupParticipantsUpdate(m.chat, [m.sender], 'remove')
-          } catch {
-            await conn.sendMessage(m.chat, {
-              text: `⚠️ No pude expulsar a ${userTag}. Verifica mis permisos de admin.`,
-              mentions: [m.sender]
-            })
-          }
+          await conn.sendMessage(m.chat, {
+            delete: {
+              remoteJid: m.chat,
+              fromMe: false,
+              id: msgID,
+              participant: delet
+            }
+          })
 
-          settings[botNumber][chatId].antilinkWarnings[m.sender] = 0
-          saveSettings(settings)
+          await conn.groupParticipantsUpdate(m.chat, [m.sender], 'remove')
+
+          chat.antilinkWarnings[m.sender] = 0
+        } catch {
+          await conn.sendMessage(m.chat, {
+            text: `⚠️ No pude expulsar a ${userTag}. Puede que no tenga permisos.`,
+            mentions: [m.sender]
+          }, { quoted: m })
         }
       }
 
+      updateChatConfig(botNumber, chatId, { antilinkWarnings: chat.antilinkWarnings })
       return true
     }
   }
