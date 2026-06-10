@@ -282,26 +282,4 @@ handler.command = /^(on|off|antilink|resetwarn)$/i
 handler.group = true
 handler.admin = true
 
-handler.before = async (m, { conn }) => {
-  if (!m.isGroup) return
-
-  const botNumber = conn.user?.jid || 'bot'
-  const chat = getChatConfig(botNumber, m.chat)
-
-  if (chat.antiarabe && m.messageStubType === 27) {
-    const newJid = m.messageStubParameters?.[0]
-    if (!newJid) return
-
-    const number = newJid.split('@')[0].replace(/\D/g, '')
-    const arabicPrefixes = ['212', '20', '971', '965', '966', '974', '973', '962']
-    const isArab = arabicPrefixes.some(prefix => number.startsWith(prefix))
-
-    if (isArab) {
-      await conn.sendMessage(m.chat, { text: `Este pndj ${newJid} será expulsado, no queremos العرب aca, adiosito. [ Anti Arabe Activado ]` })
-      await conn.groupParticipantsUpdate(m.chat, [newJid], 'remove')
-      return true
-    }
-  }
-}
-
 export default handler
