@@ -1,4 +1,6 @@
-let handler = async (m, { conn, args }) => {
+let cooldownsCazar = {}
+
+let handler = async (m, { conn }) => {
   let who = m.sender
   let user = global.db.data.users[who]
   if (!user) {
@@ -6,75 +8,83 @@ let handler = async (m, { conn, args }) => {
     user = global.db.data.users[who]
   }
 
-  let colores = ['red', 'blue', 'black']
-  let emojis = { red: '🔴', blue: '🔵', black: '⚫' }
+  let now = Date.now()
+  let cd = cooldownsCazar[who] || 0
+  let tiempoRestante = Math.ceil((cd - now) / 1000)
 
-  if (!args[0] || !colores.includes(args[0].toLowerCase()) || !args[1]) {
+  if (now < cd) {
+    let minutos = Math.floor(tiempoRestante / 60)
+    let segundos = tiempoRestante % 60
     return conn.sendMessage(m.chat, {
       text: [
         '🩸 DENJI BOT 🩸',
         '',
-        '🔪 *Apuesta a un color y gana*',
-        '',
-        '🔴 Red = x2',
-        '🔵 Blue = x3',
-        '⚫ Black = x5',
-        '',
-        '> #casino red 10',
-        '> #casino black 50',
+        '⚰️ *Aún cargas las heridas de la última caza*',
+        `> Espera *${minutos}m ${segundos}s*`,
         '',
         '🩸 DENJI BOT 🩸'
       ].join('\n')
     }, { quoted: m })
   }
 
-  let color = args[0].toLowerCase()
-  let apuesta = parseInt(args[1])
+  let random = Math.random()
+  let animal, emoji, diamantes, exp, rareza, descripcion
 
-  if (isNaN(apuesta) || apuesta <= 0) {
-    return conn.sendMessage(m.chat, {
-      text: '🩸 DENJI BOT 🩸\n\n💀 *Cantidad inválida*\n> Ingresa un número mayor a 0'
-    }, { quoted: m })
+  if (random < 0.05) {
+    animal = 'Dragón salvaje'
+    emoji = '🐉'
+    diamantes = Math.floor(Math.random() * 11) + 10
+    exp = Math.floor(Math.random() * 31) + 20
+    rareza = '⭐ LEGENDARIO'
+    descripcion = 'Lo derribaste con un solo golpe mortal'
+  } else if (random < 0.20) {
+    animal = 'Oso pardo'
+    emoji = '🐻'
+    diamantes = Math.floor(Math.random() * 6) + 5
+    exp = Math.floor(Math.random() * 21) + 10
+    rareza = '🔥 ÉPICO'
+    descripcion = 'Fue una pelea brutal pero ganaste'
+  } else if (random < 0.50) {
+    animal = 'Ciervo'
+    emoji = '🦌'
+    diamantes = Math.floor(Math.random() * 4) + 2
+    exp = Math.floor(Math.random() * 11) + 5
+    rareza = '💜 NORMAL'
+    descripcion = 'Lo seguiste y no escapó de tu cuchillo'
+  } else {
+    animal = 'Conejo'
+    emoji = '🐰'
+    diamantes = Math.floor(Math.random() * 2) + 1
+    exp = Math.floor(Math.random() * 6) + 3
+    rareza = '💚 COMÚN'
+    descripcion = 'Una presa pequeña pero algo es algo'
   }
 
-  if ((user.diamantes || 0) < apuesta) {
-    return conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n💀 *No tienes suficientes diamantes*\n> Tienes: *${user.diamantes || 0} 💎*`
-    }, { quoted: m })
-  }
-
-  let resultado = colores[Math.floor(Math.random() * colores.length)]
-  let gano = resultado === color
-  let multiplicador = color === 'red' ? 2 : color === 'blue' ? 3 : 5
-  let ganancia = gano ? apuesta * multiplicador : 0
-
-  user.diamantes = (user.diamantes || 0) - apuesta + ganancia
-  user.exp = (user.exp || 0) + Math.floor(Math.random() * 10) + 5
+  user.diamantes = (user.diamantes || 0) + diamantes
+  user.exp = (user.exp || 0) + exp
+  cooldownsCazar[who] = now + 300000
 
   await conn.sendMessage(m.chat, {
     text: [
       '🩸 DENJI BOT 🩸',
       '',
-      `🎯 Apuesta: *${apuesta} 💎*`,
-      `${emojis[color]} Color: *${color.toUpperCase()}*`,
-      `🔪 Multiplicador: *x${multiplicador}*`,
+      `${emoji} *${animal}* — ${rareza}`,
+      `🔪 ${descripcion}`,
       '',
-      `🎲 Salió: ${emojis[resultado]} *${resultado.toUpperCase()}*`,
-      '',
-      gano
-        ? `🏆 *¡GANASTE!*\n💎 +${ganancia} diamantes\n🩸 La ruleta fue tuya...`
-        : `💀 *PERDISTE*\n🔪 -${apuesta} diamantes\n⚰️ El casino se bebió tu sangre...`,
-      '',
+      `💀 Diamantes: *+${diamantes}*`,
+      `⚡ EXP: *+${exp}*`,
       `🩸 Total: *${user.diamantes} 💎*`,
+      '',
+      '> Vuelve en *5 minutos* para otra caza',
       '',
       '🩸 DENJI BOT 🩸'
     ].join('\n')
   }, { quoted: m })
 }
 
-handler.help = ['casino']
+handler.help = ['cazar']
 handler.tags = ['rpg']
-handler.command = /^(casino|apostar|bet)$/i
-handler.desc = 'Apuesta en el casino'
+handler.command = /^(cazar|hunt)$/i
+handler.desc = 'Caza animales para ganar diamantes y exp'
 
 export default handler
