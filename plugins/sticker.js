@@ -1,44 +1,31 @@
-import { downloadMediaMessage } from 'fsociety-Baileys'
-import { sticker } from '../../lib/sticker.js'
+import { downloadMediaMessage } from '@whiskeysockets/baileys'
+import { sticker } from '../lib/sticker.js'
 
-export default {
-  name: 's',
-  aliases: ['sticker', 'stiker', 'sa', 'sanim', 'stickera', 'stickeranimado'],
-  run: async (sock, msg, args, jid) => {
-    const { reply } = await import('../../utils.js')
+let handler = async (m, { conn, usedPrefix, command }) => {
+  const quoted = m.quoted ? m.quoted : m
+  const mime = (quoted.msg || quoted).mimetype || ''
 
-    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-    const isImage = quoted?.imageMessage || msg.message?.imageMessage
-    const isVideo = quoted?.videoMessage || msg.message?.videoMessage
+  const isImage = /image/.test(mime)
+  const isVideo = /video/.test(mime)
 
-    if (!isImage && !isVideo) {
-      return reply(sock, jid, '❌ Responde a una imagen o video con *.s*', msg)
-    }
-
-    try {
-      await reply(sock, jid, '⏳ Creando sticker...', msg)
-
-      const mediaMsg = (msg.message?.imageMessage || msg.message?.videoMessage)
-        ? msg
-        : { message: quoted, key: msg.key }
-
-      const buffer = await downloadMediaMessage(
-        mediaMsg,
-        'buffer',
-        {},
-        { reuploadRequest: sock.updateMediaMessage }
-      )
-
-      const stickerBuffer = await sticker(buffer, {
-        packname: '⛓️🩸 DENJI BOT 🩸⛓️',
-        author: '🩸 © JM 🩸',
-        categories: ['🩸', '⛓️']
-      })
-
-      await sock.sendMessage(jid, { sticker: stickerBuffer }, { quoted: msg })
-    } catch (e) {
-      console.error('Error en .s:', e)
-      await reply(sock, jid, `❌ Error al crear el sticker: ${e.message}`, msg)
-    }
+  if (!isImage && !isVideo) {
+    return m.reply(`❌ Responde a una imagen o video con *${usedPrefix}${command}*`)
   }
+
+  await m.reply('⏳ Creando sticker...')
+
+  const mediaMsg = quoted.msg || quoted
+  const buffer = await quoted.download()
+
+  const stickerBuffer = await sticker(buffer, {
+    packname: '⛓️🩸 DENJI BOT 🩸⛓️',
+    author: '🩸 © JM 🩸',
+    categories: ['🩸', '⛓️']
+  })
+
+  await conn.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m })
 }
+
+handler.command = /^s(ticker|tikera?|anim(ado)?)?$/i
+
+export default handler
