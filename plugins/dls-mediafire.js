@@ -6,7 +6,7 @@ import { pipeline } from 'stream/promises'
 
 const API_BASE    = process.env.DV_API_URL || 'https://dv-yer-api.online'
 const API_KEY     = process.env.DV_API_KEY || ''
-const MAX_BYTES   = 1024 * 1024 * 1024
+const MAX_BYTES = 2 * 1024 * 1024 * 1024  
 const REQ_TIMEOUT = 120_000
 const TMP_DIR     = path.join(os.tmpdir(), 'denji-mediafire')
 
