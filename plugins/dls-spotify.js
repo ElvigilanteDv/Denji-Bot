@@ -14,7 +14,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   }
 
   if (!text) {
-    let media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/r60c8l.jpg' } }, { upload: conn.waUploadToServer })
+    let media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/1l9sph.jpg' } }, { upload: conn.waUploadToServer })
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
       header: {
@@ -174,7 +174,7 @@ handler.before = async (m, { conn }) => {
     }, { quoted: m })
 
     await conn.sendMessage(m.chat, {
-      image: { url: json.data.image || 'https://files.catbox.moe/r60c8l.jpg' },
+      image: { url: json.data.image || 'https://files.catbox.moe/1l9sph.jpg' },
       caption: '🩸 DENJI BOT 🩸\n\n🔪 Descarga completada\n\n💀 Canción: ' + (json.data.title || titulo) + '\n💀 Artista: ' + (json.data.author || 'Desconocido') + '\n🩸 Diamantes restantes: ' + total
     }, { quoted: m })
 
