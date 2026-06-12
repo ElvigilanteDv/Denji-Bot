@@ -11,7 +11,7 @@ let handler = async (m, { conn }) => {
     user = global.db.data.users[who]
   }
   let name = await conn.getName(who)
-  let pp = await conn.profilePictureUrl(who, 'image').catch(() => 'https://i.ibb.co/cSCf8VWv/perfil.png')
+  let pp = await conn.profilePictureUrl(who, 'image').catch(() => 'https://files.catbox.moe/2ijtbf.png')
   let texto = '🪚「 DENJI PERFIL 」🩸\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n'
   texto += '💀 » *' + name + '*\n'
   texto += '🪚 » Clase: ' + (user.class || 'Novato del Matadero') + '\n'
