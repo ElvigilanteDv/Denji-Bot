@@ -64,7 +64,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 
   if (!input) {
     let media = null
-    try { media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/r60c8l.jpg' } }, { upload: conn.waUploadToServer }) } catch {}
+    try { media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/17i5ia.png' } }, { upload: conn.waUploadToServer }) } catch {}
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
       header: { title: 'HINATA BOT - YOUTUBE', subtitle: 'Descarga música de YouTube', hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
