@@ -1,7 +1,13 @@
 import fetch from 'node-fetch'
 
-const handler = async (m, { conn, text, usedPrefix, command }) => {
-  if (!text) throw `🩸 Usa ${usedPrefix + command} <tag>\nEjemplo: ${usedPrefix + command} miku`
+const handler = async (m, { conn, args, usedPrefix, command }) => {
+  // Unir los argumentos para formar el tag de búsqueda
+  const text = args.join(' ')
+  
+  // Verificar si se proporcionó texto después del comando
+  if (!text) {
+    throw `🩸 Usa ${usedPrefix + command} <tag>\nEjemplo: ${usedPrefix + command} miku`
+  }
 
   await m.react('🩸')
 
