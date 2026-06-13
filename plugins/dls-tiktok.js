@@ -8,9 +8,9 @@ import { randomUUID } from 'crypto'
 const TMP_DIR = path.join(os.tmpdir(), 'denji-tiktok')
 const TMP_FILE_PREFIX = 'denji-tt-'
 const TMP_MAX_AGE_MS = 2 * 60 * 60 * 1000
-const REQUEST_TIMEOUT = 60000
-const MAX_VIDEO_BYTES = 80 * 1024 * 1024
-const VIDEO_AS_DOCUMENT_THRESHOLD = 40 * 1024 * 1024
+const REQUEST_TIMEOUT = 120000
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024
+const VIDEO_AS_DOCUMENT_THRESHOLD = 99 * 1024 * 1024
 
 const API_BASE = process.env.DV_API_URL || 'https://dv-yer-api.online'
 const API_KEY  = process.env.DV_API_KEY  || 'dvyerDravenFX4'
@@ -18,6 +18,7 @@ const API_KEY  = process.env.DV_API_KEY  || 'dvyerDravenFX4'
 function ensureTmpDir() {
   try { fs.mkdirSync(TMP_DIR, { recursive: true }) } catch {}
 }
+
 function cleanupOldTempFiles() {
   ensureTmpDir()
   try {
@@ -30,21 +31,26 @@ function cleanupOldTempFiles() {
     }
   } catch {}
 }
+
 function deleteFileSafe(filePath) {
   try { if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath) } catch {}
 }
+
 function safeFileName(name) {
   return String(name || 'tiktok').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'tiktok'
 }
+
 function normalizeMp4Name(name) {
   return `${safeFileName(String(name || 'tiktok').replace(/\.mp4$/i, '')) || 'tiktok'}.mp4`
 }
+
 function extractTikTokUrl(text) {
   const match = String(text || '').match(
     /https?:\/\/(?:www\.)?(?:tiktok\.com|m\.tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com|douyin\.com)\/[^\s]+/i
   )
   return match ? match[0].trim().replace(/[)\],>]+$/g, '') : ''
 }
+
 function resolveTikTokUrl(m, text) {
   const quoted = m.quoted || null
   const quotedText = quoted?.text || quoted?.caption || ''
@@ -82,7 +88,7 @@ async function searchTikTok(query, count = 8) {
   )
   if (!data?.status || !data?.meta?.length)
     throw new Error('No se encontraron videos')
-  
+
   return data.meta.slice(0, count).map(v => ({
     pageUrl: v.share_url || v.video_url || v.link || v.url || '',
     title: safeFileName(v.title || 'tiktok'),
@@ -108,14 +114,16 @@ async function downloadFile(url, fileName) {
       'x-api-key': API_KEY
     }
   })
+
   if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
 
   let downloaded = 0
   response.data.on('data', chunk => {
     downloaded += chunk.length
     if (downloaded > MAX_VIDEO_BYTES)
-      response.data.destroy(new Error('Video demasiado pesado'))
+      response.data.destroy(new Error(`Video supera ${MAX_VIDEO_BYTES / 1024 / 1024}MB`))
   })
+
   await pipeline(response.data, fs.createWriteStream(tempPath))
 
   if (!fs.existsSync(tempPath)) throw new Error('No se pudo guardar')
@@ -129,30 +137,38 @@ async function downloadFile(url, fileName) {
 
 async function sendVideo(conn, chat, quoted, { tempPath, size, title, author, duration, likes, quality }) {
   const buffer = fs.readFileSync(tempPath)
-  const caption =
-    `⛓️🩸 DENJI BOT 🩸⛓️\n\n` +
-    `🎬 *${title}*\n` +
-    `👤 *Autor:* ${author}\n` +
-    (duration ? `⏱️ *Duración:* ${duration}s\n` : '') +
-    (likes    ? `❤️ *Likes:* ${Number(likes).toLocaleString()}\n` : '') +
-    (quality  ? `🎞️ *Calidad:* ${quality}\n` : '') +
-    `💾 *Peso:* ${(size / 1024 / 1024).toFixed(2)} MB\n\n` +
-    `> 🩸 DENJI BOT © JM 🩸`
+  const sizeMB = (size / 1024 / 1024).toFixed(2)
+
+  const caption = [
+    '🩸 DENJI BOT 🩸',
+    '',
+    `🎬 *${title}*`,
+    author ? `💀 Autor: ${author}` : '',
+    duration ? `⏱️ Duración: ${duration}s` : '',
+    likes ? `❤️ Likes: ${Number(likes).toLocaleString()}` : '',
+    quality ? `🎞️ Calidad: ${quality}` : '',
+    `💾 Peso: ${sizeMB} MB`,
+    '',
+    '> 🩸 DENJI BOT © JM'
+  ].filter(Boolean).join('\n')
 
   if (size > VIDEO_AS_DOCUMENT_THRESHOLD) {
     return conn.sendMessage(chat, {
-      document: buffer, mimetype: 'video/mp4',
+      document: buffer,
+      mimetype: 'video/mp4',
       fileName: normalizeMp4Name(title),
-      caption: caption + '\n\n📦 Como documento por peso.'
+      caption: caption + '\n\n📦 Enviado como documento por tamaño'
     }, { quoted })
   }
+
   try {
     await conn.sendMessage(chat, { video: buffer, mimetype: 'video/mp4', caption }, { quoted })
   } catch {
     await conn.sendMessage(chat, {
-      document: buffer, mimetype: 'video/mp4',
+      document: buffer,
+      mimetype: 'video/mp4',
       fileName: normalizeMp4Name(title),
-      caption: caption + '\n\n📦 Como documento.'
+      caption: caption + '\n\n📦 Enviado como documento'
     }, { quoted })
   }
 }
@@ -172,12 +188,18 @@ let handler = async (m, { conn, text }) => {
 
   if (!input) {
     return conn.sendMessage(m.chat, {
-      text:
-        `⛓️🩸 DENJI BOT 🩸⛓️\n\n` +
-        `⚡ *USO*\n\n` +
-        `🔗 *.tt <link>* → descarga ese video (1 💎)\n` +
-        `🔎 *.tt <búsqueda>* → envía 8 videos automático (1 💎 c/u)\n\n` +
-        `> 🩸 DENJI BOT © JM 🩸`
+      text: [
+        '🩸 DENJI BOT 🩸',
+        '',
+        '🔪 *Descarga TikToks sin límite de tamaño*',
+        '',
+        '🔗 Por link: *#tt <link>* → 💎 1',
+        '🔎 Por búsqueda: *#tt <texto>* → 💎 1 c/u',
+        '',
+        '> Videos pesados se envían como documento',
+        '',
+        '🩸 DENJI BOT 🩸'
+      ].join('\n')
     }, { quoted: m })
   }
 
@@ -187,7 +209,7 @@ let handler = async (m, { conn, text }) => {
   if (isLink) {
     if (diamonds < 1) {
       return conn.sendMessage(m.chat, {
-        text: `⛓️🩸 DENJI BOT 🩸⛓️\n\n💀 Sin diamantes (tienes ${diamonds})\n> Usa #work`
+        text: `🩸 DENJI BOT 🩸\n\n💀 Sin diamantes (tienes ${diamonds})\n> Usa #work para ganar`
       }, { quoted: m })
     }
 
@@ -199,7 +221,7 @@ let handler = async (m, { conn, text }) => {
       user.diamantes = oldDiamonds - 1
 
       await conn.sendMessage(m.chat, {
-        text: `⛓️🩸 DENJI BOT 🩸⛓️\n\n⚡ Descargando...\n💎 -1 diamante`
+        text: '🩸 DENJI BOT 🩸\n\n🔪 Descargando...\n💎 -1 diamante\n\n> Videos grandes pueden tardar...'
       }, { quoted: m })
 
       const meta = await resolveDownloadUrl(videoUrl)
@@ -219,7 +241,7 @@ let handler = async (m, { conn, text }) => {
       user.diamantes = oldDiamonds
       await m.react('💀')
       await conn.sendMessage(m.chat, {
-        text: `⛓️🩸 DENJI BOT 🩸⛓️\n\n💀 Error\n⚠️ ${e.message || 'Intenta de nuevo'}`
+        text: `🩸 DENJI BOT 🩸\n\n💀 Error al descargar\n> ${e.message || 'Intenta de nuevo'}`
       }, { quoted: m })
     } finally {
       deleteFileSafe(tempPath)
@@ -228,33 +250,32 @@ let handler = async (m, { conn, text }) => {
   } else {
     if (diamonds < 1) {
       return conn.sendMessage(m.chat, {
-        text: `⛓️🩸 DENJI BOT 🩸⛓️\n\n💀 Sin diamantes (tienes ${diamonds})\n> Usa #work`
+        text: `🩸 DENJI BOT 🩸\n\n💀 Sin diamantes (tienes ${diamonds})\n> Usa #work para ganar`
       }, { quoted: m })
     }
 
     let videos = []
     try {
-      await m.react('🔎')
+      await m.react('🩸')
       await conn.sendMessage(m.chat, {
-        text: `⛓️🩸 DENJI BOT 🩸⛓️\n\n🔎 Buscando: *${input}*\n⚡ Preparando 8 videos...`
+        text: `🩸 DENJI BOT 🩸\n\n🔎 Buscando: *${input}*\n⚰️ Preparando 8 videos...`
       }, { quoted: m })
 
       videos = await searchTikTok(input, 8)
     } catch (e) {
       await m.react('💀')
       return conn.sendMessage(m.chat, {
-        text: `⛓️🩸 DENJI BOT 🩸⛓️\n\n💀 Sin resultados para: *${input}*\n⚠️ ${e.message}`
+        text: `🩸 DENJI BOT 🩸\n\n💀 Sin resultados para: *${input}*\n> ${e.message}`
       }, { quoted: m })
     }
 
     let enviados = 0
     let fallidos = 0
-    const oldDiamonds = diamonds
+    const oldDiamonds = user.diamantes ?? diamonds
 
     for (const vid of videos) {
       let tempPath = null
       try {
-      
         const meta = await resolveDownloadUrl(vid.pageUrl)
         const downloaded = await downloadFile(meta.downloadUrl, meta.fileName)
         tempPath = downloaded.tempPath
@@ -281,12 +302,15 @@ let handler = async (m, { conn, text }) => {
 
     await m.react(enviados > 0 ? '🩸' : '💀')
     await conn.sendMessage(m.chat, {
-      text:
-        `⛓️🩸 DENJI BOT 🩸⛓️\n\n` +
-        `✅ *Enviados:* ${enviados}\n` +
-        `❌ *Fallidos:* ${fallidos}\n` +
-        `💎 *Usados:* ${enviados}\n\n` +
-        `> 🩸 DENJI BOT © JM 🩸`
+      text: [
+        '🩸 DENJI BOT 🩸',
+        '',
+        `✅ Enviados: *${enviados}*`,
+        `💀 Fallidos: *${fallidos}*`,
+        `💎 Usados: *${enviados}*`,
+        '',
+        '🩸 DENJI BOT 🩸'
+      ].join('\n')
     }, { quoted: m })
   }
 }
@@ -294,6 +318,6 @@ let handler = async (m, { conn, text }) => {
 handler.help = ['tt <link o búsqueda>']
 handler.tags = ['downloader']
 handler.command = /^(tt|tiktok)$/i
-handler.desc = 'Descarga TikTok por link o busca y envía 8 videos automático'
+handler.desc = 'Descarga TikTok por link o búsqueda sin límite de tamaño'
 
 export default handler
