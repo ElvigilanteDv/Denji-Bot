@@ -1,57 +1,23 @@
 import fetch from 'node-fetch'
-import fs from 'fs'
-import path from 'path'
-import axios from 'axios'
-import { pipeline } from 'stream/promises'
-import { spawn } from 'child_process'
 import {
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   proto
 } from '@whiskeysockets/baileys'
 
-const TEMP_DIR = path.join(process.cwd(), 'tmp')
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true })
-
-const REQUEST_TIMEOUT = 120000
-const MAX_VIDEO_BYTES = 1500 * 1024 * 1024
-const VIDEO_AS_DOCUMENT_THRESHOLD = 70 * 1024 * 1024
 const VIGILANTE_API = 'https://elvigilante-api.onrender.com/api'
 const VIGILANTE_KEY = 'elvigilante'
-const VIDEO_QUALITY = '720p'
 
 const _processing = new Set()
 
 function safeFileName(name) {
   return String(name || 'media').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'media'
 }
-function isHttpUrl(v) { return /^https?:\/\//i.test(String(v || '')) }
 function extractYouTubeUrl(text) {
   const m = String(text || '').match(/https?:\/\/(?:www\.)?(?:youtube\.com|music\.youtube\.com|youtu\.be)\/[^\s]+/i)
   return m ? m[0].trim() : ''
 }
-function normalizeMp4Name(name) {
-  const clean = safeFileName(String(name || 'video').replace(/\.mp4$/i, ''))
-  return `${clean || 'video'}.mp4`
-}
-function deleteFileSafe(fp) {
-  try { if (fp && fs.existsSync(fp)) fs.unlinkSync(fp) } catch {}
-}
-function parseContentDisposition(h) {
-  const t = String(h || '')
-  const u = t.match(/filename\*=UTF-8''([^;]+)/i)
-  if (u?.[1]) { try { return decodeURIComponent(u[1]).replace(/["']/g, '').trim() } catch {} }
-  const n = t.match(/filename="?([^"]+)"?/i)
-  return n?.[1]?.trim() || ''
-}
-async function readStreamToText(stream) {
-  return new Promise((res, rej) => {
-    let d = ''
-    stream.on('data', c => (d += c.toString()))
-    stream.on('end', () => res(d))
-    stream.on('error', rej)
-  })
-}
+function isHttpUrl(v) { return /^https?:\/\//i.test(String(v || '')) }
 
 function getDiamantes(user) { return user?.diamantes ?? user?.diamond ?? 0 }
 function restarDiamante(user) {
@@ -63,83 +29,25 @@ function devolverDiamante(user, anterior) {
   else user.diamond = anterior
 }
 
-async function downloadVideo(downloadUrl, outputPath) {
-  const response = await axios.get(downloadUrl, {
-    responseType: 'stream', timeout: REQUEST_TIMEOUT,
-    headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' },
-    validateStatus: () => true, maxRedirects: 10,
-  })
-  if (response.status >= 400) {
-    const err = await readStreamToText(response.data).catch(() => '')
-    throw new Error(err || 'Error al descargar el video')
-  }
-  let downloaded = 0
-  response.data.on('data', chunk => {
-    downloaded += chunk.length
-    if (downloaded > MAX_VIDEO_BYTES) response.data.destroy(new Error('Video demasiado grande'))
-  })
-  try { await pipeline(response.data, fs.createWriteStream(outputPath)) }
-  catch (e) { deleteFileSafe(outputPath); throw e }
-  if (!fs.existsSync(outputPath)) throw new Error('No se pudo guardar el video')
-  const size = fs.statSync(outputPath).size
-  if (!size || size < 150000) { deleteFileSafe(outputPath); throw new Error('Video inválido o vacío') }
-  const fromHeader = parseContentDisposition(response.headers?.['content-disposition'])
-  return { size, fileName: normalizeMp4Name(fromHeader || 'video.mp4') }
-}
-
-async function normalizeForWhatsApp(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
-      '-y', '-i', inputPath,
-      '-vf', 'scale=640:trunc(ow/a/2)*2',
-      '-c:v', 'libx264', '-b:v', '800k', '-preset', 'fast',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart', '-loglevel', 'error',
-      outputPath
-    ], { stdio: ['ignore', 'ignore', 'pipe'] })
-    ff.on('error', reject)
-    ff.on('close', code => { if (code === 0) resolve(true); else reject(new Error('ffmpeg error')) })
-  })
-}
-
-async function sendVideo(conn, m, videoUrl, title) {
-  const res = await fetch(`${VIGILANTE_API}/download/ytvideo?url=${encodeURIComponent(videoUrl)}&quality=${VIDEO_QUALITY}&apiKey=${VIGILANTE_KEY}`)
+async function sendAudio(conn, m, videoUrl, title) {
+  const res = await fetch(`${VIGILANTE_API}/download/ytaudio?url=${encodeURIComponent(videoUrl)}&apiKey=${VIGILANTE_KEY}`)
   const json = await res.json()
-  if (!json.status || !json.result?.download_url) throw new Error('No se pudo obtener el video')
-
-  const downloadUrl = json.result.download_url
+  if (!json.status || !json.result?.download_url) throw new Error('No se pudo obtener el audio.')
   const finalTitle = safeFileName(json.result.title || title)
-  const rawFile = path.join(TEMP_DIR, `yt_${Date.now()}.mp4`)
-  const finalFile = path.join(TEMP_DIR, `yt_final_${Date.now()}.mp4`)
 
-  try {
-    const videoInfo = await downloadVideo(downloadUrl, rawFile)
-    const finalName = normalizeMp4Name(videoInfo.fileName || finalTitle)
+  await conn.sendMessage(m.chat, {
+    audio: { url: json.result.download_url },
+    mimetype: 'audio/mpeg',
+    fileName: finalTitle + '.mp3'
+  }, { quoted: m })
 
-    if (videoInfo.size > VIDEO_AS_DOCUMENT_THRESHOLD) {
-      await conn.sendMessage(m.chat, {
-        document: fs.readFileSync(rawFile), mimetype: 'video/mp4',
-        fileName: finalName, caption: `🎬 ${finalTitle}`
-      }, { quoted: m })
-    } else {
-      try {
-        await conn.sendMessage(m.chat, {
-          video: fs.readFileSync(rawFile), mimetype: 'video/mp4',
-          fileName: finalName, caption: `🎬 ${finalTitle}`
-        }, { quoted: m })
-      } catch {
-        await normalizeForWhatsApp(rawFile, finalFile)
-        const filePath = fs.existsSync(finalFile) ? finalFile : rawFile
-        await conn.sendMessage(m.chat, {
-          video: fs.readFileSync(filePath), mimetype: 'video/mp4',
-          fileName: finalName, caption: `🎬 ${finalTitle}`
-        }, { quoted: m })
-      }
-    }
-  } finally {
-    deleteFileSafe(rawFile)
-    deleteFileSafe(finalFile)
+  if (json.result.thumbnail) {
+    await conn.sendMessage(m.chat, {
+      image: { url: json.result.thumbnail },
+      caption: `🎵 ${finalTitle}\n\n> 🎧 API Oficial de El Vigilante\n> 🔗 https://elvigilante-api.onrender.com`
+    }, { quoted: m })
   }
+
   return finalTitle
 }
 
@@ -159,23 +67,23 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     try { media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/r60c8l.jpg' } }, { upload: conn.waUploadToServer }) } catch {}
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: '𑁍ࠬܓ HINATA BOT 𑁍ࠬܓ', subtitle: 'Descarga videos de YouTube', hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
-      body: { text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Descarga videos de YouTube\n\n> ${usedPrefix}${command} <nombre o link>\n> Ejemplo: ${usedPrefix}${command} Naruto Opening 1\n> 💎 Cuesta 1 diamante por descarga` },
+      header: { title: 'HINATA BOT - YOUTUBE', subtitle: 'Descarga música de YouTube', hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+      body: { text: `🎵 「 HINATA YOUTUBE 」 🎵\n\n💫 » Descarga audio de YouTube\n\n> ${usedPrefix}${command} <nombre o link>\n> Ejemplo: ${usedPrefix}${command} Naruto Opening 1\n> 💎 Cuesta 1 diamante por descarga\n\n> 🎧 API Oficial de El Vigilante\n> 🔗 https://elvigilante-api.onrender.com` },
       footer: { text: '⫏⫏ HINATA BOT ✿' },
-      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎬 YOUTUBE', sections: [{ title: '¿Qué deseas hacer?', rows: [{ header: '🔍 BUSCAR', title: 'Buscar video', description: 'Escribe el nombre después del comando', id: 'ytinfo' }] }] }) }] }
+      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎵 YOUTUBE', sections: [{ title: '¿Qué deseas hacer?', rows: [{ header: '🔍 BUSCAR', title: 'Buscar música', description: 'Escribe el nombre después del comando', id: 'ytinfo' }] }] }) }] }
     })
     const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
     return conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
   }
 
   if (isHttpUrl(input) && !extractYouTubeUrl(input)) {
-    return conn.sendMessage(m.chat, { text: '𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ Envía un link válido de YouTube' }, { quoted: m })
+    return conn.sendMessage(m.chat, { text: '❌ Envía un link válido de YouTube.' }, { quoted: m })
   }
 
   const diamantes = getDiamantes(user)
   if (diamantes < 1) {
     return conn.sendMessage(m.chat, {
-      text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ No tienes suficientes diamantes\n\n❀ Necesitas: 1 💎\n❀ Tienes: ${diamantes} 💎\n\n> Usa #work para ganar`
+      text: `🎵 「 HINATA YOUTUBE 」\n\n💫 » No tienes suficientes diamantes\n💎 Necesitas: 1 | Tienes: ${diamantes}\n\n> Usa #work para ganar\n\n> 🎧 API Oficial de El Vigilante\n> 🔗 https://elvigilante-api.onrender.com`
     }, { quoted: m })
   }
 
@@ -183,7 +91,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 
   if (extractYouTubeUrl(input)) {
     const videoUrl = extractYouTubeUrl(input)
-    return _descargarVideo(conn, m, videoUrl, 'video')
+    return _descargarAudio(conn, m, videoUrl, 'video')
   }
 
   try {
@@ -197,7 +105,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       try { media = await prepareWAMessageMedia({ image: { url: resultados[0].thumbnail } }, { upload: conn.waUploadToServer }) } catch {}
     }
 
-    const rows = resultados.map((v) => ({
+    const rows = resultados.map((v, i) => ({
       header: String(v.author || 'Desconocido').slice(0, 20),
       title: String(v.title || '').slice(0, 35),
       description: `⏱️ ${v.duration || '?'} | 👁️ ${v.views || '?'}`,
@@ -205,28 +113,28 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     }))
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: '𑁍ࠬܓ HINATA BOT 𑁍ࠬܓ', subtitle: `Resultados: ${input}`, hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
-      body: { text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Búsqueda: *${input}*\n❀ ${resultados.length} resultados encontrados\n\n> Elige el video a descargar\n> 💎 1 diamante` },
+      header: { title: 'HINATA BOT - YOUTUBE', subtitle: `Resultados: ${input}`, hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+      body: { text: `🔍 「 RESULTADOS 」\n\n💫 » Búsqueda: *${input}*\n📋 ${resultados.length} resultados encontrados\n\n> Elige el que quieras descargar\n> 💎 1 diamante\n\n> 🎧 API Oficial de El Vigilante\n> 🔗 https://elvigilante-api.onrender.com` },
       footer: { text: '⫏⫏ HINATA BOT ✿' },
-      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎬 RESULTADOS', sections: [{ title: `📋 ${input.toUpperCase().slice(0, 24)}`, rows }] }) }] }
+      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎵 RESULTADOS', sections: [{ title: `📋 ${input.toUpperCase().slice(0, 24)}`, rows }] }) }] }
     })
     const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
     await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
     await m.react('✅')
   } catch (e) {
     await m.react('❌')
-    conn.sendMessage(m.chat, { text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ ${e.message}` }, { quoted: m })
+    conn.sendMessage(m.chat, { text: `❌ ${e.message}` }, { quoted: m })
   }
 }
 
-async function _descargarVideo(conn, m, videoUrl, title) {
+async function _descargarAudio(conn, m, videoUrl, title) {
   let user = global.db.data.users[m.sender]
   if (!user) { global.db.data.users[m.sender] = { diamantes: 0, diamond: 0 }; user = global.db.data.users[m.sender] }
 
   const diamantes = getDiamantes(user)
   if (diamantes < 1) {
     await conn.sendMessage(m.chat, {
-      text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ No tienes suficientes diamantes\n\n❀ Necesitas: 1 💎\n❀ Tienes: ${diamantes} 💎\n\n> Usa #work para ganar`
+      text: `🎵 「 HINATA YOUTUBE 」\n\n💫 » No tienes suficientes diamantes\n💎 Necesitas: 1 | Tienes: ${diamantes}\n\n> Usa #work para ganar\n\n> 🎧 API Oficial de El Vigilante\n> 🔗 https://elvigilante-api.onrender.com`
     }, { quoted: m })
     return
   }
@@ -236,24 +144,20 @@ async function _descargarVideo(conn, m, videoUrl, title) {
 
   await m.react('⏳')
   await conn.sendMessage(m.chat, {
-    text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Descargando video...\n❀ ${title} (${VIDEO_QUALITY})\n❀ -1 💎\n\n> Espera un momento...`
+    text: `🎵 *Descargando audio...*\n🎧 ${title}\n💎 -1 diamante\n⏳ Espera un momento...\n\n> 🎧 API Oficial de El Vigilante`
   }, { quoted: m })
 
   try {
-    const finalTitle = await sendVideo(conn, m, videoUrl, title)
+    const finalTitle = await sendAudio(conn, m, videoUrl, title)
     await conn.sendMessage(m.chat, {
-      text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n✅ Descarga completada\n\n❀ ${finalTitle || title}\n❀ Diamantes restantes: ${restantes} 💎`
+      text: `✅ *Descarga completada*\n\n🎵 » ${finalTitle || title}\n💎 » Diamantes restantes: ${restantes}\n\n> 🎧 API Oficial de El Vigilante\n> 🔗 https://elvigilante-api.onrender.com`
     }, { quoted: m })
     await m.react('✅')
   } catch (e) {
     devolverDiamante(user, diamantes)
     console.error('[YT ERROR]', e.message)
     await m.react('❌')
-    const rawMsg = String(e?.message || '').toLowerCase()
-    const humanMsg = (rawMsg.includes('502') || rawMsg.includes('503') || rawMsg.includes('bad gateway'))
-      ? '𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n⚠️ El servidor está saturado\n\n> Intenta más tarde\n> 💎 Diamante devuelto'
-      : `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ ${e.message || 'Error al descargar'}\n\n> 💎 Diamante devuelto`
-    await conn.sendMessage(m.chat, { text: humanMsg }, { quoted: m })
+    await conn.sendMessage(m.chat, { text: `❌ ${e.message || 'Error al descargar.'}\n💎 Diamante devuelto.` }, { quoted: m })
   }
 }
 
@@ -277,30 +181,31 @@ handler.before = async (m, { conn }) => {
   if (!id) return false
 
   if (id === 'ytinfo') {
-    await conn.sendMessage(m.chat, {
-      text: '𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Escribe el nombre así:\n> .yt2 Naruto Opening 1'
-    }, { quoted: m })
+    await conn.sendMessage(m.chat, { text: '🔍 Escribe el nombre así:\n> .yt Naruto Opening 1' }, { quoted: m })
     return true
   }
 
   if (id.startsWith('ytsel~')) {
     const parts = id.split('~')
     if (parts.length < 3) return true
+    const urlB64   = parts[1]
+    const titleB64 = parts[2]
     let videoUrl, title
     try {
-      videoUrl = Buffer.from(parts[1], 'base64').toString()
-      title = Buffer.from(parts[2], 'base64').toString()
+      videoUrl = Buffer.from(urlB64, 'base64').toString()
+      title    = Buffer.from(titleB64, 'base64').toString()
     } catch { return true }
-    await _descargarVideo(conn, m, videoUrl, title)
+
+    await _descargarAudio(conn, m, videoUrl, title)
     return true
   }
 
   return false
 }
 
-handler.help = ['video']
-handler.tags = ['downloader']
-handler.command = /^(yt|ytmp4|video)$/i
-handler.desc = 'Descarga videos de YouTube con API propia 💎1'
+handler.help    = ['yt', 'play', 'audio']
+handler.tags    = ['downloader']
+handler.command = /^(yt|ytmp3|audio|mp3|song|play|musica|cancion)$/i
+handler.desc    = 'Descarga audio de YouTube 💎1 | API Oficial de El Vigilante'
 
 export default handler
