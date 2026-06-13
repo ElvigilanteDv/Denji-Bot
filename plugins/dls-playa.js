@@ -4,15 +4,10 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { pipeline } from 'stream/promises'
-import {
-  generateWAMessageFromContent,
-  proto
-} from '@whiskeysockets/baileys'
 
 const DV_API_URL = process.env.DV_API_URL
 const DV_API_KEY = process.env.DV_API_KEY
 const TMP_DIR = path.join(os.tmpdir(), 'denji-yt')
-const SEP = '|~|'
 
 function ensureTmp() {
   try { fs.mkdirSync(TMP_DIR, { recursive: true }) } catch {}
@@ -44,16 +39,10 @@ async function dvAudio(youtubeUrl) {
   const params = new URLSearchParams({ url: youtubeUrl })
   if (DV_API_KEY) params.set('apikey', DV_API_KEY)
   const res = await fetch(`${DV_API_URL}/ytmp3?${params}`)
-  const json = await res.json()
-  if (!json.ok) throw new Error(json.detail || json.error || json.message || 'API sin resultado')
-  return json
-}
-
-async function dvVideo(youtubeUrl, quality = '480p') {
-  const params = new URLSearchParams({ url: youtubeUrl, quality })
-  if (DV_API_KEY) params.set('apikey', DV_API_KEY)
-  const res = await fetch(`${DV_API_URL}/ytmp4?${params}`)
-  const json = await res.json()
+  const text = await res.text()
+  if (text.trim().startsWith('<')) throw new Error('API no disponible, intenta más tarde')
+  let json
+  try { json = JSON.parse(text) } catch { throw new Error('Respuesta inválida de la API') }
   if (!json.ok) throw new Error(json.detail || json.error || json.message || 'API sin resultado')
   return json
 }
@@ -107,7 +96,8 @@ let handlerAudio = async (m, { conn, text, usedPrefix, command }) => {
     await conn.sendMessage(m.chat, {
       audio: { stream: fs.createReadStream(tmpPath) },
       mimetype: 'audio/mpeg',
-      fileName: filename + '.mp3'
+      fileName: filename + '.mp3',
+      caption: `🩸 DENJI BOT 🩸\n\n🎵 *${title}*`
     }, { quoted: m })
 
     await m.react('🩸')
@@ -128,4 +118,4 @@ handlerAudio.tags = ['downloader']
 handlerAudio.command = /^(playa|mp3a|audioa)$/i
 handlerAudio.desc = 'Descarga audio de YouTube (API alternativa)'
 
-export { handlerAudio as default }
+export default handlerAudio
