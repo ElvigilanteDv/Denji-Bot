@@ -44,7 +44,10 @@ async function dvVideo(youtubeUrl, quality = '480p') {
   const params = new URLSearchParams({ url: youtubeUrl, quality })
   if (DV_API_KEY) params.set('apikey', DV_API_KEY)
   const res = await fetch(`${DV_API_URL}/ytmp4?${params}`)
-  const json = await res.json()
+  const text = await res.text()
+  if (text.trim().startsWith('<')) throw new Error('API no disponible, intenta más tarde')
+  let json
+  try { json = JSON.parse(text) } catch { throw new Error('Respuesta inválida de la API') }
   if (!json.ok) throw new Error(json.detail || json.error || json.message || 'API sin resultado')
   return json
 }
@@ -144,8 +147,6 @@ handler.before = async (m, { conn }) => {
     const id = data.id || data.selectedId || data.selectedRowId || null
     if (!id) return false
 
-    console.log('[VIDEOA] ID recibido:', id)
-
     if (id.startsWith('vdva' + SEP) && !id.startsWith('vdvadl' + SEP)) {
       const payload = id.slice(('vdva' + SEP).length)
       const [urlB64, titleB64] = payload.split(SEP)
@@ -189,8 +190,6 @@ handler.before = async (m, { conn }) => {
       const titleB64 = parts[2]
       const ytUrl = Buffer.from(urlB64, 'base64url').toString()
       const titulo = Buffer.from(titleB64, 'base64url').toString()
-
-      console.log('[VIDEOA] Descargando:', ytUrl, quality)
 
       await m.react('⚰️')
       await conn.sendMessage(m.chat, {
