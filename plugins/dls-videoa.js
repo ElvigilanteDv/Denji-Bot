@@ -142,85 +142,85 @@ handler.before = async (m, { conn }) => {
   try {
     const data = JSON.parse(nativeFlow.paramsJson || '{}')
     const id = data.id || data.selectedId || data.selectedRowId || null
-    if (!id?.startsWith('vdva' + SEP)) return false
+    if (!id) return false
 
-    const payload = id.slice(('vdva' + SEP).length)
-    const [urlB64, titleB64] = payload.split(SEP)
-    const ytUrl = Buffer.from(urlB64, 'base64url').toString()
-    const titulo = Buffer.from(titleB64, 'base64url').toString()
+    console.log('[VIDEOA] ID recibido:', id)
 
-    const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: 'DENJI BOT - YOUTUBE', subtitle: 'Elige la calidad', hasMediaAttachment: false },
-      body: { text: `🩸 DENJI BOT 🩸\n\n🔪 ${titulo}\n\n💀 ¿Qué calidad quieres?` },
-      footer: { text: '🩸 DENJI BOT 🩸' },
-      nativeFlowMessage: {
-        buttons: [{
-          name: 'single_select',
-          buttonParamsJson: JSON.stringify({
-            title: '🎬 CALIDAD',
-            sections: [{
-              title: '💀 ELIGE',
-              rows: [
-                { header: '🎬', title: 'MP4 - 480p', description: '💀 Calidad normal', id: 'vdvadl' + SEP + '480p' + SEP + urlB64 + SEP + titleB64 },
-                { header: '🎬', title: 'MP4 - 720p', description: '🩸 Alta definición', id: 'vdvadl' + SEP + '720p' + SEP + urlB64 + SEP + titleB64 },
-                { header: '🎬', title: 'MP4 - 1080p', description: '⭐ Full HD', id: 'vdvadl' + SEP + '1080p' + SEP + urlB64 + SEP + titleB64 }
-              ]
-            }]
-          })
-        }]
-      }
-    })
+    if (id.startsWith('vdva' + SEP) && !id.startsWith('vdvadl' + SEP)) {
+      const payload = id.slice(('vdva' + SEP).length)
+      const [urlB64, titleB64] = payload.split(SEP)
+      const titulo = Buffer.from(titleB64, 'base64url').toString()
 
-    const msg = generateWAMessageFromContent(m.chat, {
-      viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } }
-    }, { quoted: m })
+      const interactiveMessage = proto.Message.InteractiveMessage.create({
+        header: { title: 'DENJI BOT - YOUTUBE', subtitle: 'Elige la calidad', hasMediaAttachment: false },
+        body: { text: `🩸 DENJI BOT 🩸\n\n🔪 ${titulo}\n\n💀 ¿Qué calidad quieres?` },
+        footer: { text: '🩸 DENJI BOT 🩸' },
+        nativeFlowMessage: {
+          buttons: [{
+            name: 'single_select',
+            buttonParamsJson: JSON.stringify({
+              title: '🎬 CALIDAD',
+              sections: [{
+                title: '💀 ELIGE',
+                rows: [
+                  { header: '🎬', title: 'MP4 - 480p', description: '💀 Calidad normal', id: 'vdvadl' + SEP + '480p' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬', title: 'MP4 - 720p', description: '🩸 Alta definición', id: 'vdvadl' + SEP + '720p' + SEP + urlB64 + SEP + titleB64 },
+                  { header: '🎬', title: 'MP4 - 1080p', description: '⭐ Full HD', id: 'vdvadl' + SEP + '1080p' + SEP + urlB64 + SEP + titleB64 }
+                ]
+              }]
+            })
+          }]
+        }
+      })
 
-    await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
-    return true
-
-  } catch {}
-
-  try {
-    const data = JSON.parse(nativeFlow.paramsJson || '{}')
-    const id = data.id || data.selectedId || data.selectedRowId || null
-    if (!id?.startsWith('vdvadl' + SEP)) return false
-
-    const parts = id.slice(('vdvadl' + SEP).length).split(SEP)
-    const quality = parts[0]
-    const urlB64 = parts[1]
-    const titleB64 = parts[2]
-    const ytUrl = Buffer.from(urlB64, 'base64url').toString()
-    const titulo = Buffer.from(titleB64, 'base64url').toString()
-
-    await m.react('⚰️')
-    await conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${quality}...\n💀 ${titulo}`
-    }, { quoted: m })
-
-    const result = await dvVideo(ytUrl, quality)
-    const streamUrl = result.download_url || result.stream_url
-    const finalTitle = sanitize(result.title || titulo)
-
-    let tmpPath = null
-    try {
-      tmpPath = await downloadToFile(streamUrl, 'mp4')
-
-      await conn.sendMessage(m.chat, {
-        video: { stream: fs.createReadStream(tmpPath) },
-        fileName: finalTitle + '.mp4',
-        mimetype: 'video/mp4',
-        caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
+      const msg = generateWAMessageFromContent(m.chat, {
+        viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } }
       }, { quoted: m })
 
-      await m.react('🩸')
-    } finally {
-      deleteSafe(tmpPath)
+      await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
+      return true
     }
 
-    return true
+    if (id.startsWith('vdvadl' + SEP)) {
+      const payload = id.slice(('vdvadl' + SEP).length)
+      const parts = payload.split(SEP)
+      const quality = parts[0]
+      const urlB64 = parts[1]
+      const titleB64 = parts[2]
+      const ytUrl = Buffer.from(urlB64, 'base64url').toString()
+      const titulo = Buffer.from(titleB64, 'base64url').toString()
+
+      console.log('[VIDEOA] Descargando:', ytUrl, quality)
+
+      await m.react('⚰️')
+      await conn.sendMessage(m.chat, {
+        text: `🩸 DENJI BOT 🩸\n\n🔪 Descargando ${quality}...\n💀 ${titulo}`
+      }, { quoted: m })
+
+      const result = await dvVideo(ytUrl, quality)
+      const streamUrl = result.download_url || result.stream_url
+      const finalTitle = sanitize(result.title || titulo)
+
+      let tmpPath = null
+      try {
+        tmpPath = await downloadToFile(streamUrl, 'mp4')
+        await conn.sendMessage(m.chat, {
+          video: { stream: fs.createReadStream(tmpPath) },
+          fileName: finalTitle + '.mp4',
+          mimetype: 'video/mp4',
+          caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
+        }, { quoted: m })
+        await m.react('🩸')
+      } finally {
+        deleteSafe(tmpPath)
+      }
+      return true
+    }
+
+    return false
 
   } catch (e) {
-    console.log('[VIDEOA DL ERROR]', e.message)
+    console.log('[VIDEOA ERROR]', e.message)
     await m.react('💀')
     conn.sendMessage(m.chat, { text: '🩸 DENJI BOT 🩸\n\n💀 Error: ' + e.message }, { quoted: m })
     return true
