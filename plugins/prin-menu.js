@@ -37,10 +37,9 @@ const defaultMenu = {
 ··──→ 𝙏𝙞𝙢𝙚  : %time
 ✦─────────────────✦
 %readmore`.trim(),
-  header: '\n\\ꔫ꒾/%category〔%count〕\\ꔫ꒾/\n⌐╦╦═──────────────────╗',
-  body:   'ω···->> %cmd',
-  desc:   '  ↳ 🔪 %desc',
-  footer: '╚══════════════════════⌐╦╦═─',
+  header: '\n\\ꔫ꒾/%category〔%count〕\\ꔫ꒾/\n⸻⸻⸻⸻⸻⸻',
+  body:   '\n❧ %cmd\n  ↳ %desc',
+  footer: '⸻⸻⸻⸻⸻⸻',
   after:  '\n✦─────────────────✦\n꒰ঌ ᴄʀᴇᴀᴅᴏ ᴘᴏʀ ᴊᴍ ✦ ᴅᴇɴᴊɪ ʙᴏᴛ ໒꒱\n✦─────────────────✦'
 }
 
@@ -123,10 +122,11 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
         const cmds = pluginList
           .filter(p => p.tags.includes(tag))
           .flatMap(p =>
-            p.help.map(h =>
-              menu.body.replace('%cmd', p.prefix ? h : _p + h) +
-              (p.desc ? '\n' + menu.desc.replace('%desc', p.desc) : '')
-            )
+            p.help.map(h => {
+              const cmd = p.prefix ? h : _p + h
+              const desc = p.desc ? `  ↳ ${p.desc}` : ''
+              return `❧ ${cmd}${desc ? '\n' + desc : ''}`
+            })
           ).join('\n')
 
         if (!cmds) return ''
