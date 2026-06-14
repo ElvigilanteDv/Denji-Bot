@@ -1,125 +1,190 @@
 import fs from 'fs'
-import path, { join } from 'path'
+import path from 'path'
 import fetch from 'node-fetch'
 import { xpRange } from '../lib/levelling.js'
 
-const tags = {
-  main: '🔩 PRINCIPAL',
-  group: '⛓️ GRUPOS',
-  rpg: '🩸 RPG',
-  game: '🎯 JUEGOS',
-  gacha: '🔮 GACHA',
-  diversion: '💀 DIVERSION',
-  anime: '🗡️ ANIME',
-  serbot: '🤖 SERBOT',
-  owner: '⚙️ OWNER',
-  downloader: '📥 DESCARGAS',
-  info: '📟 INFO'
+// ─── Charset Cyberpunk (estilo Hinata) ───────────────────────────────────────
+const charset = {
+  a:'ᴀ',b:'ʙ',c:'ᴄ',d:'ᴅ',e:'ᴇ',f:'ꜰ',g:'ɢ',h:'ʜ',i:'ɪ',
+  j:'ᴊ',k:'ᴋ',l:'ʟ',m:'ᴍ',n:'ɴ',o:'ᴏ',p:'ᴘ',q:'ǫ',r:'ʀ',
+  s:'ꜱ',t:'ᴛ',u:'ᴜ',v:'ᴠ',w:'ᴡ',x:'x',y:'ʏ',z:'ᴢ'
+}
+const textCyberpunk = t => t.replace(/[a-z]/gi, c => charset[c.toLowerCase()] || c)
+
+// ─── Categorías ──────────────────────────────────────────────────────────────
+const tagLabels = {
+  main:       '🔩 Principal',
+  group:      '⛓️ Grupos',
+  rpg:        '🩸 RPG',
+  game:       '🎯 Juegos',
+  gacha:      '🔮 Gacha',
+  diversion:  '💀 Diversión',
+  anime:      '🗡️ Anime',
+  serbot:     '🤖 Serbot',
+  owner:      '⚙️ Owner',
+  downloader: '📥 Descargas',
+  info:       '📟 Info'
 }
 
+// ─── Plantilla por defecto ────────────────────────────────────────────────────
 const defaultMenu = {
   before: `
-🩸 D E N J I  B O T 🩸
-💀 チェンソーマン 💀
-🔪 El Hombre Motosierra 🔪
+࿇ ══━━━✥◈✥━━━══ ࿇
+    𝕯𝖊𝖓𝖏𝖎  𝕭𝖔𝖙
+࿇ ══━━━✥◈✥━━━══ ࿇
 
-⚰️ %time
-💀 %totalreg usuarios registrados
-🔪 %totalcmd comandos activos
-🩸 %uptime activo
+𖣔 ɪɴꜰᴏ ˚ʚ♡ɞ˚
+❧ 𝙐𝙨𝙚𝙧 » %name
+❧ 𝙀𝙭𝙥   » %exp / %maxexp
+❧ 𝙉𝙞𝙫𝙚𝙡 » %level
+❧ 𝙈𝙤𝙙𝙤  » %mode
+❧ 𝙐𝙥    » %uptime
+❧ 𝙐𝙨𝙧𝙨  » %totalreg
+❧ 𝙏𝙞𝙢𝙚  » %time
+
 %readmore
-`,
-  header: '\n💀 %category 〔%count〕\n',
-  body: '  🩸 %cmd',
-  desc: '\n     ↳🔪 %desc',
-  footer: '',
-  after: `
-🩸 D E N J I  B O T 🩸
-💀 Creado por JM 💀`
+`.trim(),
+  header: '\n𖣔 %category 〔%count〕˚ʚ♡ɞ˚',
+  body:   '❧ %cmd',
+  desc:   '\n  ↳ %desc',
+  footer: '⸻⸻⸻⸻⸻⸻',
+  after:  '\n࿇ ══━━━✥◈✥━━━══ ࿇\nᶜʳᵉᵃᵈᵒ ᵖᵒʳ ᴶᴹ ✦ ᴰᵉⁿʲⁱ ᴮᵒᵗ\n࿇ ══━━━✥◈✥━━━══ ࿇'
 }
 
+// ─── Persistencia de media por JID (igual que Hinata) ────────────────────────
+const menuDir = './media/menu'
+fs.mkdirSync(menuDir, { recursive: true })
+
+const getMenuMediaFile = jid =>
+  path.join(menuDir, `menuMedia_${jid.replace(/[:@.]/g, '_')}.json`)
+
+const loadMenuMedia = jid => {
+  try { return JSON.parse(fs.readFileSync(getMenuMediaFile(jid))) }
+  catch { return {} }
+}
+
+const fetchBuffer = async url => {
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`HTTP ${r.status} al obtener: ${url}`)
+  return Buffer.from(await r.arrayBuffer())
+}
+
+// Carga lazy del thumb por defecto (evita top-level await frágil)
+let _defaultThumb = null
+const getDefaultThumb = async () => {
+  if (!_defaultThumb) _defaultThumb = await fetchBuffer('https://files.catbox.moe/ks2023.jpg')
+  return _defaultThumb
+}
+
+// ─── Readmore ─────────────────────────────────────────────────────────────────
+const more = String.fromCharCode(8206)
+const readMore = more.repeat(4001)
+
+// ─── Uptime legible ───────────────────────────────────────────────────────────
+const clockString = ms =>
+  [3600000, 60000, 1000]
+    .map((v, i) => String(Math.floor(ms / v) % (i ? 60 : 99)).padStart(2, '0'))
+    .join(':')
+
+// ─── Handler ──────────────────────────────────────────────────────────────────
 let handler = async (m, { conn, usedPrefix: _p, command }) => {
   try {
-    let user = global.db.data.users[m.sender]
-    if (!user) {
-      user = { exp: 0, level: 0 }
-      global.db.data.users[m.sender] = user
+    await conn.sendMessage(m.chat, { react: { text: '🩸', key: m.key } })
+
+  
+    const users = global.db?.data?.users ?? {}
+    if (!users[m.sender]) users[m.sender] = { exp: 0, level: 0 }
+    const user = users[m.sender]
+    const { min, xp } = xpRange(user.level, global.multiplier)
+
+    // Media personalizada por JID (igual que Hinata)
+    const botJid = conn.user.jid
+    const menuMedia = loadMenuMedia(botJid)
+    const menu = global.subBotMenus?.[botJid] || defaultMenu
+
+    // Tabla de reemplazos
+    const replace = {
+      name:     await conn.getName(m.sender),
+      level:    user.level,
+      exp:      Math.max(0, user.exp - min),
+      maxexp:   xp,
+      totalreg: Object.keys(users).length,
+      totalcmd: Object.keys(global.plugins ?? {}).length,
+      mode:     global.opts?.self ? 'Privado' : 'Público',
+      uptime:   clockString(process.uptime() * 1000),
+      time:     new Date().toLocaleString('es-MX', { hour12: true }),
+      readmore: readMore
     }
 
-    const help = Object.values(global.plugins)
+    // Lista de plugins válidos
+    const pluginList = Object.values(global.plugins ?? {})
       .filter(p => !p.disabled)
       .map(p => ({
-        help: Array.isArray(p.help) ? p.help : [p.help],
-        tags: Array.isArray(p.tags) ? p.tags : [p.tags],
+        help:   [].concat(p.help ?? []),
+        tags:   [].concat(p.tags ?? []),
         prefix: 'customPrefix' in p,
-        desc: p.desc || ''
+        desc:   p.desc || ''
       }))
 
-    let tagSeleccionada = null
-    if (command.startsWith('menu') && command.length > 4) {
-      let tagBuscada = command.replace('menu', '').toLowerCase()
-      for (let key of Object.keys(tags)) {
-        if (key.toLowerCase() === tagBuscada) {
-          tagSeleccionada = key
-          break
-        }
-      }
+    // Detectar tag pedida: ej. "menurpg" → "rpg"
+    let tagFiltro = null
+    const match = command.match(/^(?:menu|menú|help)(.+)$/i)
+    if (match) {
+      const buscada = match[1].toLowerCase()
+      tagFiltro = Object.keys(tagLabels).find(k => k === buscada) ?? null
     }
 
-    let bannerFinal = 'https://files.catbox.moe/ks2023.jpg'
+    // Construir secciones
+    const secciones = Object.entries(tagLabels)
+      .filter(([tag]) => !tagFiltro || tag === tagFiltro)
+      .map(([tag, label]) => {
+        const cmds = pluginList
+          .filter(p => p.tags.includes(tag))
+          .flatMap(p =>
+            p.help.map(h =>
+              menu.body.replace('%cmd', p.prefix ? h : _p + h) +
+              (p.desc ? '\n' + menu.desc.replace('%desc', p.desc) : '')
+            )
+          ).join('\n')
 
-    let textoMenu = defaultMenu.before
-      .replace(/%time/g, new Date().toLocaleString())
-      .replace(/%totalreg/g, Object.keys(global.db.data.users).length)
-      .replace(/%totalcmd/g, Object.keys(global.plugins).length)
-      .replace(/%uptime/g, Math.floor(process.uptime() / 60) + 'm ' + Math.floor(process.uptime() % 60) + 's')
+        if (!cmds) return ''
+        const count = pluginList.filter(p => p.tags.includes(tag)).length
+        const header = menu.header
+          .replace('%category', textCyberpunk(label))
+          .replace('%count', count)
+        return `${header}\n${cmds}\n${menu.footer}`
+      })
+      .filter(Boolean)
 
-    if (tagSeleccionada) {
-      textoMenu = textoMenu.replace('D E N J I  B O T', 'DENJI BOT ' + tags[tagSeleccionada])
-    }
+    // Texto completo
+    const texto = [menu.before, ...secciones, menu.after]
+      .join('\n')
+      .replace(/%(\w+)/g, (_, k) => replace[k] ?? '')
 
-    for (let tag of Object.keys(tags)) {
-      if (tagSeleccionada && tag !== tagSeleccionada) continue
-      const cmds = help
-        .filter(menu => menu.tags?.includes(tag))
-        .map(menu => menu.help.map(h =>
-          defaultMenu.body.replace(/%cmd/g, menu.prefix ? h : `${_p}${h}`) +
-          (menu.desc ? defaultMenu.desc.replace(/%desc/g, menu.desc) : '')
-        ).join('\n')).join('\n')
-
-      if (cmds) {
-        let count = help.filter(menu => menu.tags?.includes(tag)).length
-        textoMenu += defaultMenu.header.replace(/%category/g, tags[tag]).replace(/%count/g, count)
-        textoMenu += cmds + '\n'
-      }
-    }
-
-    textoMenu += defaultMenu.after
-
-    const replace = { readmore: readMore }
-    let texto = textoMenu
-    for (let key of Object.keys(replace)) {
-      texto = texto.replace(new RegExp(`%${key}`, 'g'), replace[key])
-    }
+    // Thumbnail: personalizado por JID o default
+    const thumb = menuMedia.thumbnail && fs.existsSync(menuMedia.thumbnail)
+      ? fs.readFileSync(menuMedia.thumbnail)
+      : await getDefaultThumb()
 
     await conn.sendMessage(m.chat, {
-      image: { url: bannerFinal },
-      caption: texto.trim()
+      image:      thumb,
+      caption:    texto.trim(),
+      footer:     'DENJI SYSTEM',
+      headerType: 4
     }, { quoted: m })
 
   } catch (e) {
-    console.log(e)
-    await conn.sendMessage(m.chat, { text: `🩸 DENJI BOT 🩸\n\n💀 Error:\n${e}` }, { quoted: m })
+    console.error('[menu_denji]', e)
+    await conn.sendMessage(m.chat, {
+      text: `🩸 *DENJI BOT* 🩸\n\n💀 Error:\n${e?.message ?? e}`
+    }, { quoted: m })
   }
 }
 
-handler.help = ['menu', 'menú', 'help']
-handler.tags = ['main']
+handler.help    = ['menu', 'menú', 'help']
+handler.tags    = ['main']
 handler.command = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|info|main)?$/i
 handler.register = false
-handler.desc = 'Muestra el menú principal'
+handler.desc    = 'Muestra el menú principal de Denji Bot'
 
 export default handler
-
-const more = String.fromCharCode(8206)
-const readMore = more.repeat(4001)
