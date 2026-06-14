@@ -3,7 +3,6 @@ import path from 'path'
 import fetch from 'node-fetch'
 import { xpRange } from '../lib/levelling.js'
 
-// ─── Charset Cyberpunk (estilo Hinata) ───────────────────────────────────────
 const charset = {
   a:'ᴀ',b:'ʙ',c:'ᴄ',d:'ᴅ',e:'ᴇ',f:'ꜰ',g:'ɢ',h:'ʜ',i:'ɪ',
   j:'ᴊ',k:'ᴋ',l:'ʟ',m:'ᴍ',n:'ɴ',o:'ᴏ',p:'ᴘ',q:'ǫ',r:'ʀ',
@@ -11,7 +10,6 @@ const charset = {
 }
 const textCyberpunk = t => t.replace(/[a-z]/gi, c => charset[c.toLowerCase()] || c)
 
-// ─── Categorías ──────────────────────────────────────────────────────────────
 const tagLabels = {
   main:       '🔩 Principal',
   group:      '⛓️ Grupos',
@@ -26,32 +24,26 @@ const tagLabels = {
   info:       '📟 Info'
 }
 
-// ─── Plantilla por defecto ────────────────────────────────────────────────────
 const defaultMenu = {
   before: `
-࿇ ══━━━✥◈✥━━━══ ࿇
-    𝕯𝖊𝖓𝖏𝖎  𝕭𝖔𝖙
-࿇ ══━━━✥◈✥━━━══ ࿇
-
-𖣔 ɪɴꜰᴏ ˚ʚ♡ɞ˚
-❧ 𝙐𝙨𝙚𝙧 » %name
-❧ 𝙀𝙭𝙥   » %exp / %maxexp
-❧ 𝙉𝙞𝙫𝙚𝙡 » %level
-❧ 𝙈𝙤𝙙𝙤  » %mode
-❧ 𝙐𝙥    » %uptime
-❧ 𝙐𝙨𝙧𝙨  » %totalreg
-❧ 𝙏𝙞𝙢𝙚  » %time
-
-%readmore
-`.trim(),
-  header: '\n𖣔 %category 〔%count〕˚ʚ♡ɞ˚',
-  body:   '❧ %cmd',
-  desc:   '\n  ↳ %desc',
-  footer: '⸻⸻⸻⸻⸻⸻',
-  after:  '\n࿇ ══━━━✥◈✥━━━══ ࿇\nᶜʳᵉᵃᵈᵒ ᵖᵒʳ ᴶᴹ ✦ ᴰᵉⁿʲⁱ ᴮᵒᵗ\n࿇ ══━━━✥◈✥━━━══ ࿇'
+꒰ঌ DENJI BOT ໒꒱
+✦─────────────────✦
+··──→ 𝙐𝙨𝙚𝙧  : %name
+··──→ 𝙉𝙞𝙫𝙚𝙡 : %level
+··──→ 𝙀𝙭𝙥   : %exp / %maxexp
+··──→ 𝙈𝙤𝙙𝙤  : %mode
+··──→ 𝙐𝙥    : %uptime
+··──→ 𝙐𝙨𝙧𝙨  : %totalreg
+··──→ 𝙏𝙞𝙢𝙚  : %time
+✦─────────────────✦
+%readmore`.trim(),
+  header: '\n\\ꔫ꒾/%category〔%count〕\\ꔫ꒾/\n⌐╦╦═──────────────────╗',
+  body:   'ω···->> %cmd',
+  desc:   '  ↳ 🔪 %desc',
+  footer: '╚══════════════════════⌐╦╦═─',
+  after:  '\n✦─────────────────✦\n꒰ঌ ᴄʀᴇᴀᴅᴏ ᴘᴏʀ ᴊᴍ ✦ ᴅᴇɴᴊɪ ʙᴏᴛ ໒꒱\n✦─────────────────✦'
 }
 
-// ─── Persistencia de media por JID (igual que Hinata) ────────────────────────
 const menuDir = './media/menu'
 fs.mkdirSync(menuDir, { recursive: true })
 
@@ -65,44 +57,37 @@ const loadMenuMedia = jid => {
 
 const fetchBuffer = async url => {
   const r = await fetch(url)
-  if (!r.ok) throw new Error(`HTTP ${r.status} al obtener: ${url}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status} al obtener imagen: ${url}`)
   return Buffer.from(await r.arrayBuffer())
 }
 
-// Carga lazy del thumb por defecto (evita top-level await frágil)
 let _defaultThumb = null
 const getDefaultThumb = async () => {
   if (!_defaultThumb) _defaultThumb = await fetchBuffer('https://files.catbox.moe/ks2023.jpg')
   return _defaultThumb
 }
 
-// ─── Readmore ─────────────────────────────────────────────────────────────────
 const more = String.fromCharCode(8206)
 const readMore = more.repeat(4001)
 
-// ─── Uptime legible ───────────────────────────────────────────────────────────
 const clockString = ms =>
   [3600000, 60000, 1000]
     .map((v, i) => String(Math.floor(ms / v) % (i ? 60 : 99)).padStart(2, '0'))
     .join(':')
 
-// ─── Handler ──────────────────────────────────────────────────────────────────
 let handler = async (m, { conn, usedPrefix: _p, command }) => {
   try {
     await conn.sendMessage(m.chat, { react: { text: '🩸', key: m.key } })
 
-  
     const users = global.db?.data?.users ?? {}
     if (!users[m.sender]) users[m.sender] = { exp: 0, level: 0 }
     const user = users[m.sender]
     const { min, xp } = xpRange(user.level, global.multiplier)
 
-    // Media personalizada por JID (igual que Hinata)
     const botJid = conn.user.jid
     const menuMedia = loadMenuMedia(botJid)
     const menu = global.subBotMenus?.[botJid] || defaultMenu
 
-    // Tabla de reemplazos
     const replace = {
       name:     await conn.getName(m.sender),
       level:    user.level,
@@ -116,7 +101,6 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       readmore: readMore
     }
 
-    // Lista de plugins válidos
     const pluginList = Object.values(global.plugins ?? {})
       .filter(p => !p.disabled)
       .map(p => ({
@@ -126,7 +110,6 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
         desc:   p.desc || ''
       }))
 
-    // Detectar tag pedida: ej. "menurpg" → "rpg"
     let tagFiltro = null
     const match = command.match(/^(?:menu|menú|help)(.+)$/i)
     if (match) {
@@ -134,7 +117,6 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       tagFiltro = Object.keys(tagLabels).find(k => k === buscada) ?? null
     }
 
-    // Construir secciones
     const secciones = Object.entries(tagLabels)
       .filter(([tag]) => !tagFiltro || tag === tagFiltro)
       .map(([tag, label]) => {
@@ -156,12 +138,10 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       })
       .filter(Boolean)
 
-    // Texto completo
     const texto = [menu.before, ...secciones, menu.after]
       .join('\n')
       .replace(/%(\w+)/g, (_, k) => replace[k] ?? '')
 
-    // Thumbnail: personalizado por JID o default
     const thumb = menuMedia.thumbnail && fs.existsSync(menuMedia.thumbnail)
       ? fs.readFileSync(menuMedia.thumbnail)
       : await getDefaultThumb()
@@ -181,10 +161,10 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
   }
 }
 
-handler.help    = ['menu', 'menú', 'help']
-handler.tags    = ['main']
-handler.command = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|info|main)?$/i
+handler.help     = ['menu', 'menú', 'help']
+handler.tags     = ['main']
+handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|info|main)?$/i
 handler.register = false
-handler.desc    = 'Muestra el menú principal de Denji Bot'
+handler.desc     = 'Muestra el menú principal de Denji Bot'
 
 export default handler
