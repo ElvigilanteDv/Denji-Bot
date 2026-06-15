@@ -1,4 +1,4 @@
-import { MsEdgeTTS, OUTPUT_FORMAT } from 'edge-tts'
+import { MsEdgeTTS, OUTPUT_FORMAT, PITCH, RATE } from 'msedge-tts'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -6,15 +6,14 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
-
-const VOICE = 'es-MX-LibertadNeural'
+const VOICE = 'es-MX-JorgeNeural' 
 
 const handler = async (m, { conn, usedPrefix, command }) => {
   const text = m.text?.slice((usedPrefix + command).length).trim()
 
   if (!text) {
     return conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n🔪 Convierte texto a voz tenebrosa\n\n> ${usedPrefix}${command} <texto>\n> Ejemplo: ${usedPrefix}${command} nadie escapa de la muerte`
+      text: `🩸 DENJI BOT 🩸\n\n🔪 Convierte texto a voz tenebrosa\n\n> ${usedPrefix}${command} <texto>\n> Ejemplo: ${usedPrefix}${command} nadie escapa de mis cadenas`
     }, { quoted: m })
   }
 
@@ -25,9 +24,12 @@ const handler = async (m, { conn, usedPrefix, command }) => {
   const finalPath = path.join(tmpDir, `tts_final_${Date.now()}.mp3`)
 
   try {
-    // Generar voz con edge-tts
     const tts = new MsEdgeTTS()
-    await tts.setMetadata(VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+    await tts.setMetadata(VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, {
+      pitch: PITCH.LOW,
+      rate: RATE.SLOW
+    })
+
     const { audioStream } = await tts.toStream(text)
 
     await new Promise((resolve, reject) => {
@@ -38,8 +40,7 @@ const handler = async (m, { conn, usedPrefix, command }) => {
       audioStream.on('error', reject)
     })
 
-    // Procesar con ffmpeg para hacerla más grave y tenebrosa
-    await execAsync(`ffmpeg -y -i "${rawPath}" -af "asetrate=44100*0.78,aresample=44100,atempo=1.1,bass=g=8" "${finalPath}"`)
+    await execAsync(`ffmpeg -y -i "${rawPath}" -af "asetrate=44100*0.80,aresample=44100,atempo=1.1,bass=g=6" "${finalPath}"`)
 
     const audioData = fs.readFileSync(finalPath)
 
