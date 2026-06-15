@@ -25,6 +25,7 @@
   },
   "license": "MIT-LICENSE",
   "dependencies": {
+    "dotenv": "^16.4.5",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "github:ElvigilanteDv/bails.git",
     "awesome-phonenumber": "^3.4.0",
