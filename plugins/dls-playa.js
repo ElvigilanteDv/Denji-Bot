@@ -113,9 +113,9 @@ let handlerAudio = async (m, { conn, text, usedPrefix, command }) => {
   }
 }
 
-handlerAudio.help = ['playmp3']
+handlerAudio.help = ['playa']
 handlerAudio.tags = ['downloader']
-handlerAudio.command = /^(playa|mp3a|audioa)$/i
+handlerAudio.command = /^(playmp3|mp3a|audioa)$/i
 handlerAudio.desc = 'Descarga audio de YouTube (API alternativa)'
 
 export default handlerAudio
