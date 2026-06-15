@@ -228,7 +228,7 @@ handler.before = async (m, { conn }) => {
 
 handler.help = ['videomp4']
 handler.tags = ['downloader']
-handler.command = /^(videoa|mp4a|ytv)$/i
+handler.command = /^(videomp4|mp4a|ytv)$/i
 handler.desc = 'Descarga videos de YouTube con selector de calidad (API alternativa)'
 
 export default handler
