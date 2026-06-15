@@ -8,8 +8,16 @@ import { pipeline } from 'stream/promises'
 
 const execAsync = promisify(exec)
 
-const VOICE = 'Brian'
-const SE_API = 'https://api.streamelements.com/kappa/v2/speech'
+async function getTTS(text, voice = 'es-MX-JorgeNeural') {
+  const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=es&client=tw-ob`
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res
+}
 
 const handler = async (m, { conn, usedPrefix, command }) => {
   const text = m.text?.slice((usedPrefix + command).length).trim()
@@ -20,9 +28,9 @@ const handler = async (m, { conn, usedPrefix, command }) => {
     }, { quoted: m })
   }
 
-  if (text.length > 500) {
+  if (text.length > 200) {
     return conn.sendMessage(m.chat, {
-      text: '🩸 DENJI BOT 🩸\n\n💀 Texto demasiado largo\n> Máximo 500 caracteres'
+      text: '🩸 DENJI BOT 🩸\n\n💀 Texto demasiado largo\n> Máximo 200 caracteres'
     }, { quoted: m })
   }
 
@@ -33,17 +41,14 @@ const handler = async (m, { conn, usedPrefix, command }) => {
   const finalPath = path.join(tmpDir, `tts_final_${Date.now()}.mp3`)
 
   try {
-    const url = `${SE_API}?voice=${VOICE}&text=${encodeURIComponent(text)}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`StreamElements error: HTTP ${res.status}`)
-
+    const res = await getTTS(text)
     await pipeline(res.body, fs.createWriteStream(rawPath))
 
     if (!fs.existsSync(rawPath) || fs.statSync(rawPath).size < 100) {
       throw new Error('Audio inválido o vacío')
     }
 
-    await execAsync(`ffmpeg -y -i "${rawPath}" -af "asetrate=44100*0.78,aresample=44100,atempo=1.1,bass=g=8,volume=1.5" "${finalPath}"`)
+    await execAsync(`ffmpeg -y -i "${rawPath}" -af "asetrate=44100*0.75,aresample=44100,atempo=1.15,bass=g=10,volume=1.5" "${finalPath}"`)
 
     const audioData = fs.readFileSync(finalPath)
 
@@ -70,6 +75,6 @@ const handler = async (m, { conn, usedPrefix, command }) => {
 handler.help = ['tts2 <texto>']
 handler.tags = ['tools']
 handler.command = /^(tts2|voz2)$/i
-handler.desc = 'Convierte texto a voz tenebrosa (StreamElements)'
+handler.desc = 'Convierte texto a voz tenebrosa'
 
 export default handler
