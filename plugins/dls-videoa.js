@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { pipeline } from 'stream/promises'
+import ffmpeg from 'fluent-ffmpeg'
 import {
   generateWAMessageFromContent,
   proto
@@ -75,7 +76,6 @@ async function downloadToFile(streamUrl, ext, attempt = 1) {
     throw new Error('Archivo inválido')
   }
 
-  // Si el servidor reportó un tamaño y lo que llegó es notablemente menor, el archivo viene cortado
   if (expectedSize && actualSize < expectedSize * 0.98) {
     deleteSafe(tmpPath)
     if (attempt < 2) return downloadToFile(streamUrl, ext, attempt + 1)
@@ -83,6 +83,43 @@ async function downloadToFile(streamUrl, ext, attempt = 1) {
   }
 
   return tmpPath
+}
+
+function remuxFaststart(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .outputOptions(['-c', 'copy', '-movflags', '+faststart'])
+      .on('error', reject)
+      .on('end', () => resolve(outputPath))
+      .save(outputPath)
+  })
+}
+
+function reencodeH264(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .outputOptions(['-preset', 'veryfast', '-crf', '23', '-movflags', '+faststart'])
+      .on('error', reject)
+      .on('end', () => resolve(outputPath))
+      .save(outputPath)
+  })
+}
+
+// Garantiza que el mp4 sea reproducible en WhatsApp: primero intenta un remux
+// rápido (sin recodificar), y si el codec original no es compatible, recodifica.
+async function fixVideoForWhatsapp(inputPath) {
+  const outputPath = inputPath.replace(/\.mp4$/i, '') + '-fixed.mp4'
+  try {
+    await remuxFaststart(inputPath, outputPath)
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1000) return outputPath
+    throw new Error('remux vacío')
+  } catch {
+    deleteSafe(outputPath)
+    await reencodeH264(inputPath, outputPath)
+    return outputPath
+  }
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
@@ -224,9 +261,11 @@ handler.before = async (m, { conn }) => {
       const finalTitle = sanitize(result.title || titulo)
 
       let tmpPath = null
+      let fixedPath = null
       try {
         tmpPath = await downloadToFile(streamUrl, 'mp4')
-        const videoBuffer = await fs.promises.readFile(tmpPath)
+        fixedPath = await fixVideoForWhatsapp(tmpPath)
+        const videoBuffer = await fs.promises.readFile(fixedPath)
 
         await conn.sendMessage(m.chat, {
           video: videoBuffer,
@@ -237,6 +276,7 @@ handler.before = async (m, { conn }) => {
         await m.react('🩸')
       } finally {
         deleteSafe(tmpPath)
+        deleteSafe(fixedPath)
       }
       return true
     }
