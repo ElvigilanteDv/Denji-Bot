@@ -52,13 +52,36 @@ async function dvVideo(youtubeUrl, quality = '480p') {
   return json
 }
 
-async function downloadToFile(streamUrl, ext) {
+async function downloadToFile(streamUrl, ext, attempt = 1) {
   ensureTmp()
-  const tmpPath = path.join(TMP_DIR, `${Date.now()}.${ext}`)
+  const tmpPath = path.join(TMP_DIR, `${Date.now()}-${attempt}.${ext}`)
   const res = await fetch(streamUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow' })
   if (!res.ok) throw new Error(`HTTP ${res.status} al descargar`)
-  await pipeline(res.body, fs.createWriteStream(tmpPath))
-  if (!fs.existsSync(tmpPath) || fs.statSync(tmpPath).size < 100) throw new Error('Archivo inválido')
+
+  const expectedSize = Number(res.headers.get('content-length') || 0)
+
+  try {
+    await pipeline(res.body, fs.createWriteStream(tmpPath))
+  } catch (e) {
+    deleteSafe(tmpPath)
+    throw new Error('La descarga se interrumpió a mitad de camino')
+  }
+
+  if (!fs.existsSync(tmpPath)) throw new Error('Archivo inválido')
+  const actualSize = fs.statSync(tmpPath).size
+
+  if (actualSize < 100) {
+    deleteSafe(tmpPath)
+    throw new Error('Archivo inválido')
+  }
+
+  // Si el servidor reportó un tamaño y lo que llegó es notablemente menor, el archivo viene cortado
+  if (expectedSize && actualSize < expectedSize * 0.98) {
+    deleteSafe(tmpPath)
+    if (attempt < 2) return downloadToFile(streamUrl, ext, attempt + 1)
+    throw new Error(`Descarga incompleta (${actualSize}/${expectedSize} bytes) - intenta de nuevo`)
+  }
+
   return tmpPath
 }
 
@@ -203,8 +226,10 @@ handler.before = async (m, { conn }) => {
       let tmpPath = null
       try {
         tmpPath = await downloadToFile(streamUrl, 'mp4')
+        const videoBuffer = await fs.promises.readFile(tmpPath)
+
         await conn.sendMessage(m.chat, {
-          video: { stream: fs.createReadStream(tmpPath) },
+          video: videoBuffer,
           fileName: finalTitle + '.mp4',
           mimetype: 'video/mp4',
           caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado\n\n💀 ${finalTitle}\n💀 Calidad: *${result.quality || quality}*`
