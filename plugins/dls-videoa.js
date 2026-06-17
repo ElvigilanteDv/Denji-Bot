@@ -85,6 +85,16 @@ async function downloadToFile(streamUrl, ext, attempt = 1) {
   return tmpPath
 }
 
+function probeVideoCodec(inputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(inputPath, (err, data) => {
+      if (err) return reject(err)
+      const videoStream = data.streams?.find(s => s.codec_type === 'video')
+      resolve(videoStream?.codec_name || null)
+    })
+  })
+}
+
 function remuxFaststart(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
@@ -107,19 +117,27 @@ function reencodeH264(inputPath, outputPath) {
   })
 }
 
-// Garantiza que el mp4 sea reproducible en WhatsApp: primero intenta un remux
-// rápido (sin recodificar), y si el codec original no es compatible, recodifica.
+// Garantiza que el mp4 sea reproducible en WhatsApp. Si el video ya viene en
+// H.264, solo arregla la posición del moov atom (rápido, sin recodificar).
+// Si viene en otro codec (VP9/AV1, típico en YouTube a 720p+), recodifica.
 async function fixVideoForWhatsapp(inputPath) {
   const outputPath = inputPath.replace(/\.mp4$/i, '') + '-fixed.mp4'
-  try {
-    await remuxFaststart(inputPath, outputPath)
-    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1000) return outputPath
-    throw new Error('remux vacío')
-  } catch {
+
+  let codec = null
+  try { codec = await probeVideoCodec(inputPath) } catch {}
+
+  const esH264 = codec && ['h264', 'avc', 'avc1'].includes(String(codec).toLowerCase())
+
+  if (esH264) {
+    try {
+      await remuxFaststart(inputPath, outputPath)
+      if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1000) return outputPath
+    } catch {}
     deleteSafe(outputPath)
-    await reencodeH264(inputPath, outputPath)
-    return outputPath
   }
+
+  await reencodeH264(inputPath, outputPath)
+  return outputPath
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
