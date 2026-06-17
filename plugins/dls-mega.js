@@ -1,14 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import axios from 'axios'
+import { File } from 'megajs'
 import { pipeline } from 'stream/promises'
 
-const API_BASE = process.env.DV_API_URL
-const API_KEY = process.env.DV_API_KEY
-const API_MEGA_URL = `${API_BASE}/mega`
-
-const REQUEST_TIMEOUT = 180000
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
 const TMP_DIR = path.join(os.tmpdir(), 'denji-mega')
 
@@ -68,21 +63,6 @@ function extractMegaUrl(text) {
   return match ? match[0].trim().replace(/[)\],>]+$/g, '') : ''
 }
 
-function extractApiError(data, status) {
-  return data?.detail || data?.error?.message || data?.message || (status ? `HTTP ${status}` : 'Error de API')
-}
-
-function parseContentDispositionFileName(headerValue) {
-  const text = String(headerValue || '')
-  const utfMatch = text.match(/filename\*=UTF-8''([^;]+)/i)
-  if (utfMatch?.[1]) {
-    try { return decodeURIComponent(utfMatch[1]).replace(/["']/g, '').trim() } catch {}
-  }
-  const normalMatch = text.match(/filename="?([^"]+)"?/i)
-  if (normalMatch?.[1]) return normalMatch[1].trim()
-  return ''
-}
-
 function deleteFileSafe(filePath) {
   try { if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath) } catch {}
 }
@@ -96,100 +76,27 @@ function humanBytes(bytes) {
   return `${value >= 100 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
 
-async function readStreamToText(stream) {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    stream.on('data', chunk => { data += chunk.toString() })
-    stream.on('end', () => resolve(data))
-    stream.on('error', reject)
-  })
-}
+async function downloadFromMega(fileUrl, tmpDir) {
+  const file = File.fromURL(fileUrl)
+  await file.loadAttributes()
 
-function withApiKey(params = {}) {
-  return { ...params, apikey: API_KEY }
-}
+  if (file.size && file.size > MAX_FILE_BYTES) throw new Error('Archivo demasiado grande')
 
-function buildHeaders(extra = {}) {
-  return {
-    Accept: 'application/json,text/plain,*/*',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36',
-    Referer: `${API_BASE}/`,
-    ...extra
-  }
-}
-
-async function apiGet(url, params, timeout = 45000) {
-  const response = await axios.get(url, {
-    timeout,
-    params: withApiKey(params),
-    headers: buildHeaders(),
-    validateStatus: () => true,
-  })
-  const data = response.data
-  if (response.status >= 400) throw new Error(extractApiError(data, response.status))
-  if (data?.ok === false || data?.status === false) throw new Error(extractApiError(data, response.status))
-  return data
-}
-
-async function requestMegaMeta(fileUrl) {
-  const data = await apiGet(API_MEGA_URL, { mode: 'link', url: fileUrl })
-
-  const streamUrl =
-    data?.stream_url || data?.download_url ||
-    data?.stream_url_full || data?.download_url_full || null
-
-  return {
-    title: safeFileName(data?.title || data?.filename || 'MEGA File'),
-    fileName: normalizeFileName(data?.filename || 'mega-file'),
-    fileSize: String(data?.filesize || '').trim() || null,
-    fileSizeBytes: Number(data?.filesize_bytes || 0) || null,
-    streamUrl,
-  }
-}
-
-async function downloadMegaFile(streamUrl, outputPath) {
-  const response = await axios.get(streamUrl, {
-    responseType: 'stream',
-    timeout: REQUEST_TIMEOUT,
-    params: withApiKey({}),
-    headers: buildHeaders({ Accept: '*/*' }),
-    validateStatus: () => true,
-    maxRedirects: 5,
-  })
-
-  if (response.status >= 400) {
-    const errorText = await readStreamToText(response.data).catch(() => '')
-    let parsed = null
-    try { parsed = JSON.parse(errorText) } catch {}
-    throw new Error(extractApiError(parsed || { message: errorText || 'No se pudo descargar.' }, response.status))
-  }
-
-  const contentLength = Number(response.headers?.['content-length'] || 0)
-  if (contentLength && contentLength > MAX_FILE_BYTES) throw new Error('Archivo demasiado grande')
-
-  let downloaded = 0
-  response.data.on('data', chunk => {
-    downloaded += chunk.length
-    if (downloaded > MAX_FILE_BYTES) response.data.destroy(new Error('Archivo demasiado grande'))
-  })
+  const fileName = normalizeFileName(file.name || 'mega-file')
+  const tempPath = path.join(tmpDir, `${Date.now()}-${fileName}`)
+  const downloadStream = file.download({ maxConnections: 4 })
 
   try {
-    await pipeline(response.data, fs.createWriteStream(outputPath))
+    await pipeline(downloadStream, fs.createWriteStream(tempPath))
   } catch (e) {
-    deleteFileSafe(outputPath)
-    throw e
+    deleteFileSafe(tempPath)
+    throw new Error('No se pudo completar la descarga desde MEGA')
   }
 
-  if (!fs.existsSync(outputPath)) throw new Error('No se pudo guardar el archivo')
-  const size = fs.statSync(outputPath).size
-  if (!size || size < 1) { deleteFileSafe(outputPath); throw new Error('Archivo descargado inválido') }
-  if (size > MAX_FILE_BYTES) { deleteFileSafe(outputPath); throw new Error('Archivo demasiado grande') }
+  const size = fs.statSync(tempPath).size
+  if (!size || size < 1) { deleteFileSafe(tempPath); throw new Error('Archivo descargado inválido') }
 
-  return {
-    tempPath: outputPath,
-    size,
-    fileName: normalizeFileName(parseContentDispositionFileName(response.headers?.['content-disposition']) || path.basename(outputPath), 'mega-file'),
-  }
+  return { tempPath, size, fileName, title: safeFileName(file.name || 'MEGA File') }
 }
 
 let handler = async (m, { conn, text }) => {
@@ -218,6 +125,12 @@ let handler = async (m, { conn, text }) => {
     }, { quoted: m })
   }
 
+  if (/\/folder\//i.test(fileUrl)) {
+    return conn.sendMessage(m.chat, {
+      text: '🩸 DENJI BOT 🩸\n\n💀 Solo se aceptan links de archivos, no de carpetas'
+    }, { quoted: m })
+  }
+
   if (diamonds < 1) {
     return conn.sendMessage(m.chat, {
       text: `🩸 DENJI BOT 🩸\n\n💀 Sin diamantes (tienes ${diamonds})\n> Usa #work para ganar`
@@ -232,31 +145,25 @@ let handler = async (m, { conn, text }) => {
     user.diamantes = oldDiamonds - 1
 
     await conn.sendMessage(m.chat, {
-      text: '🩸 DENJI BOT 🩸\n\n🔪 Preparando descarga de MEGA...\n💎 -1 diamante'
+      text: '🩸 DENJI BOT 🩸\n\n🔪 Descargando desde MEGA...\n💎 -1 diamante'
     }, { quoted: m })
 
-    const info = await requestMegaMeta(fileUrl)
-    if (!info.streamUrl) throw new Error('La API no devolvió un enlace de descarga válido')
-
-    tempPath = path.join(TMP_DIR, `${Date.now()}-${info.fileName}`)
-
-    const downloaded = await downloadMegaFile(info.streamUrl, tempPath)
-    const finalName = normalizeFileName(downloaded.fileName || info.fileName, 'mega-file')
-    const pretty = info.fileSize || humanBytes(info.fileSizeBytes || downloaded.size)
+    const result = await downloadFromMega(fileUrl, TMP_DIR)
+    tempPath = result.tempPath
 
     await conn.sendMessage(m.chat, {
-      document: { url: downloaded.tempPath },
-      mimetype: mimeFromFileName(finalName),
-      fileName: finalName,
+      document: { url: result.tempPath },
+      mimetype: mimeFromFileName(result.fileName),
+      fileName: result.fileName,
       caption: [
         '🩸 DENJI BOT 🩸',
         '',
-        `🔪 Descarga completada`,
-        `💀 Archivo: *${info.title}*`,
-        pretty ? `💀 Tamaño: *${pretty}*` : '',
+        '🔪 Descarga completada',
+        `💀 Archivo: *${result.title}*`,
+        `💀 Tamaño: *${humanBytes(result.size)}*`,
         '',
         '🩸 DENJI BOT 🩸'
-      ].filter(Boolean).join('\n')
+      ].join('\n')
     }, { quoted: m })
 
     await m.react('🩸')
