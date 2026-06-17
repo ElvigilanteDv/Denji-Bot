@@ -133,19 +133,25 @@ async function apiGet(url, params, timeout = 45000) {
 
 async function requestMegaMeta(fileUrl) {
   const data = await apiGet(API_MEGA_URL, { mode: 'link', url: fileUrl })
+
+  const streamUrl =
+    data?.stream_url || data?.download_url ||
+    data?.stream_url_full || data?.download_url_full || null
+
   return {
     title: safeFileName(data?.title || data?.filename || 'MEGA File'),
     fileName: normalizeFileName(data?.filename || 'mega-file'),
     fileSize: String(data?.filesize || '').trim() || null,
     fileSizeBytes: Number(data?.filesize_bytes || 0) || null,
+    streamUrl,
   }
 }
 
-async function downloadMegaFile(fileUrl, outputPath) {
-  const response = await axios.get(API_MEGA_URL, {
+async function downloadMegaFile(streamUrl, outputPath) {
+  const response = await axios.get(streamUrl, {
     responseType: 'stream',
     timeout: REQUEST_TIMEOUT,
-    params: withApiKey({ mode: 'file', url: fileUrl }),
+    params: withApiKey({}),
     headers: buildHeaders({ Accept: '*/*' }),
     validateStatus: () => true,
     maxRedirects: 5,
@@ -230,9 +236,11 @@ let handler = async (m, { conn, text }) => {
     }, { quoted: m })
 
     const info = await requestMegaMeta(fileUrl)
+    if (!info.streamUrl) throw new Error('La API no devolvió un enlace de descarga válido')
+
     tempPath = path.join(TMP_DIR, `${Date.now()}-${info.fileName}`)
 
-    const downloaded = await downloadMegaFile(fileUrl, tempPath)
+    const downloaded = await downloadMegaFile(info.streamUrl, tempPath)
     const finalName = normalizeFileName(downloaded.fileName || info.fileName, 'mega-file')
     const pretty = info.fileSize || humanBytes(info.fileSizeBytes || downloaded.size)
 
