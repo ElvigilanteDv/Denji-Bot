@@ -11,39 +11,38 @@ const charset = {
 const textCyberpunk = t => t.replace(/[a-z]/gi, c => charset[c.toLowerCase()] || c)
 
 const tagLabels = {
-  main:       '🔩 Principal',
-  group:      '⛓️ Grupos',
-  rpg:        '🩸 RPG',
-  game:       '🎯 Juegos',
-  gacha:      '🔮 Gacha',
-  diversion:  '💀 Diversión',
-  anime:      '🗡️ Anime',
-  serbot:     '🤖 Serbot',
-  owner:      '⚙️ Owner',
-  downloader: '📥 Descargas',
-  converter:  '🔧 Conversores',
-  info:       '📟 Info'
+  main:       'Principal',
+  group:      'Grupos',
+  rpg:        'RPG',
+  game:       'Juegos',
+  gacha:      'Gacha',
+  diversion:  'Diversion',
+  anime:      'Anime',
+  serbot:     'Serbot',
+  owner:      'Owner',
+  downloader: 'Descargas',
+  tools:      'Tools',
+  sticker:    'Sticker',
+  info:       'Info'
 }
 
-// Cualquier tag que NO esté arriba cae aquí, así nunca se "pierde" un comando
-const FALLBACK_LABEL = '🧩 Otros'
+const FALLBACK_LABEL = 'Otros'
 
 const defaultMenu = {
   before: `
-꒰ঌ DENJI BOT ໒꒱
-✦─────────────────✦
-··──→ 𝙐𝙨𝙚𝙧  : %name
-··──→ 𝙉𝙞𝙫𝙚𝙡 : %level
-··──→ 𝙀𝙭𝙥   : %exp / %maxexp
-··──→ 𝙏𝙤𝙩𝙖𝙡 : %totalcmd comandos
-··──→ 𝙈𝙤𝙙𝙤  : %mode
-··──→ 𝙐𝙨𝙚𝙧𝙨 : %totalreg
-··──→ 𝙏𝙞𝙚𝙢𝙥𝙤: %uptime
-✦─────────────────✦
+ᴅᴇɴᴊɪ ʙᴏᴛ
+
+Usuario   : %name
+Nivel     : %level  (%exp/%maxexp)
+Modo      : %mode
+Comandos  : %totalcmd
+Usuarios  : %totalreg
+Uptime    : %uptime
+Hora      : %time
+
 %readmore`.trim(),
-  header: '\n✦ %category 〔%count〕\n⸻⸻⸻⸻⸻⸻',
-  footer: '',
-  after:  '\n✦─────────────────✦\n꒰ঌ ᴄʀᴇᴀᴅᴏ ᴘᴏʀ ᴊᴍ ✦ ᴅᴇɴᴊɪ ʙᴏᴛ ໒꒱\n✦─────────────────✦'
+  header: '\n%category (%count)',
+  after:  '\nDenji Bot - creado por JM'
 }
 
 const menuDir = './media/menu'
@@ -77,10 +76,10 @@ const clockString = ms =>
     .map((v, i) => String(Math.floor(ms / v) % (i ? 60 : 99)).padStart(2, '0'))
     .join(':')
 
-// Una sola línea por comando, limpia y consistente
+// Cada comando: una línea con el nombre, y si tiene desc, otra línea indentada debajo
 const buildCommandLine = (p, h, prefix) => {
   const cmd = p.prefix ? h : prefix + h
-  return p.desc ? `❧ ${cmd}\n   ↳ ${p.desc}` : `❧ ${cmd}`
+  return p.desc ? `  ${cmd}\n    ${p.desc}` : `  ${cmd}`
 }
 
 let handler = async (m, { conn, usedPrefix: _p, command }) => {
@@ -112,7 +111,7 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       maxexp:   xp,
       totalreg: Object.keys(users).length,
       totalcmd: pluginList.reduce((acc, p) => acc + p.help.length, 0),
-      mode:     global.opts?.self ? 'Privado' : 'Público',
+      mode:     global.opts?.self ? 'Privado' : 'Publico',
       uptime:   clockString(process.uptime() * 1000),
       time:     new Date().toLocaleString('es-MX', { hour12: true }),
       readmore: readMore
@@ -142,7 +141,6 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       .map(([tag, label]) => buildSection(label, pluginList.filter(p => p.tags.includes(tag))))
       .filter(Boolean)
 
-    // Comandos cuyo tag no coincide con nada de tagLabels — antes desaparecían, ahora caen aquí
     if (!tagFiltro) {
       const huerfanos = pluginList.filter(p => !p.tags.some(t => tagLabels[t]))
       const seccionHuerfanos = buildSection(FALLBACK_LABEL, huerfanos)
@@ -150,7 +148,7 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
     }
 
     const texto = [menu.before, ...secciones, menu.after]
-      .join('\n')
+      .join('\n\n')
       .replace(/%(\w+)/g, (_, k) => replace[k] ?? '')
 
     const thumb = menuMedia.thumbnail && fs.existsSync(menuMedia.thumbnail)
@@ -167,14 +165,14 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
   } catch (e) {
     console.error('[menu_denji]', e)
     await conn.sendMessage(m.chat, {
-      text: `🩸 *DENJI BOT* 🩸\n\n💀 Error:\n${e?.message ?? e}`
+      text: `DENJI BOT\n\nError:\n${e?.message ?? e}`
     }, { quoted: m })
   }
 }
 
 handler.help     = ['menu', 'menú', 'help']
 handler.tags     = ['main']
-handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|converter|info|main)?$/i
+handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|tools|sticker|info|main)?$/i
 handler.register = false
 handler.desc     = 'Muestra el menú principal de Denji Bot'
 
