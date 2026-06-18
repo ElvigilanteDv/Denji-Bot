@@ -163,7 +163,7 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
 
 handler.help     = ['menu', 'menú', 'help']
 handler.tags     = ['main']
-handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|info|main)?$/i
+handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|tools|info|main)?$/i
 handler.register = false
 handler.desc     = 'Muestra el menú principal de Denji Bot'
 
