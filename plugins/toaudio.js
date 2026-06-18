@@ -67,7 +67,7 @@ let handler = async (m, { conn }) => {
 }
 
 handler.help = ['toaudio']
-handler.tags = ['tools']
+handler.tags = ['converter']
 handler.command = /^(toaudio|ado|extraeraudio)$/i
 handler.desc = 'Convierte un video a audio (mp3)'
 
