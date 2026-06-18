@@ -1,8 +1,56 @@
 import fetch from 'node-fetch'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 import {
   generateWAMessageFromContent,
   proto
 } from '@whiskeysockets/baileys'
+
+const TMP_DIR = path.join(os.tmpdir(), 'denji-aptoide')
+const MAX_APK_BYTES = 1.5 * 1024 * 1024 * 1024 // 1.5 GB — límite práctico (WA soporta hasta 2 GB)
+
+function ensureTmp() {
+  try { fs.mkdirSync(TMP_DIR, { recursive: true }) } catch {}
+}
+ensureTmp()
+
+function deleteSafe(p) {
+  try { if (p && fs.existsSync(p)) fs.unlinkSync(p) } catch {}
+}
+
+async function downloadApk(url, destPath) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    redirect: 'follow',
+    timeout: 10 * 60 * 1000
+  })
+  if (!res.ok) throw new Error(`Error descargando APK: HTTP ${res.status}`)
+
+  // Revisar tamaño por Content-Length antes de descargar
+  const contentLength = parseInt(res.headers.get('content-length') || '0', 10)
+  if (contentLength > MAX_APK_BYTES) {
+    throw new Error(`APK demasiado grande (${(contentLength / 1024 / 1024).toFixed(1)} MB)`)
+  }
+
+  // Stream directo al disco — no carga todo en RAM
+  await new Promise((resolve, reject) => {
+    const fileStream = fs.createWriteStream(destPath)
+    res.body.pipe(fileStream)
+    res.body.on('error', reject)
+    fileStream.on('finish', resolve)
+    fileStream.on('error', reject)
+  })
+
+  const stat = fs.statSync(destPath)
+  if (stat.size < 1000) throw new Error('El APK descargado está vacío o es inválido')
+  if (stat.size > MAX_APK_BYTES) {
+    deleteSafe(destPath)
+    throw new Error(`APK demasiado grande (${(stat.size / 1024 / 1024).toFixed(1)} MB)`)
+  }
+
+  return stat.size
+}
 
 const SEP = '|~|'
 const BASE = 'https://ws75.aptoide.com/api/7'
@@ -174,7 +222,6 @@ handler.before = async (m, { conn }) => {
         throw new Error('Sin detalle')
       }
     } catch {
-      // Fallback: usar los datos básicos del search
       card = {
         name: nombre,
         pkg,
@@ -187,7 +234,8 @@ handler.before = async (m, { conn }) => {
       }
     }
 
-    const lines = [
+    // ── Info básica ──
+    const infoText = [
       '🩸 DENJI BOT 🩸',
       '',
       `🎮 *${card.name}*`,
@@ -197,22 +245,52 @@ handler.before = async (m, { conn }) => {
       `⭐ Rating: ${card.rating}`,
       `📥 Descargas: ${card.downloads}`,
       '',
-      `🔗 *Aptoide:*\n${card.storeUrl}`,
-      '',
-    ]
+      `🔗 Aptoide: ${card.storeUrl}`,
+    ].join('\n')
 
-    if (card.apkUrl) {
-      lines.push(`📥 *APK Directo:*\n${card.apkUrl}`)
-      lines.push('')
+    await conn.sendMessage(m.chat, { text: infoText }, { quoted: m })
+
+    // ── Intentar descargar y enviar el APK ──
+    if (!card.apkUrl) {
+      await conn.sendMessage(m.chat, {
+        text: '🩸 DENJI BOT 🩸\n\n💀 Este juego no tiene APK directo disponible en la API.\n> Descárgalo desde el link de Aptoide.'
+      }, { quoted: m })
+      await m.react('💀')
+      return true
     }
 
-    lines.push('> ⚠️ Instala APKs solo de fuentes en las que confíes')
-
     await conn.sendMessage(m.chat, {
-      text: lines.join('\n')
+      text: `🩸 DENJI BOT 🩸\n\n⚰️ Descargando APK de *${card.name}*...\n💀 Esto puede tardar según el tamaño`
     }, { quoted: m })
 
-    await m.react('🩸')
+    const apkPath = path.join(TMP_DIR, `${pkg}-${Date.now()}.apk`)
+
+    try {
+      await downloadApk(card.apkUrl, apkPath)
+      const apkStat = fs.statSync(apkPath)
+      const sizeMb = (apkStat.size / 1024 / 1024).toFixed(1)
+      const fileName = `${card.name.replace(/[^\w\s]/g, '').trim()}_v${card.version}.apk`
+
+      await conn.sendMessage(m.chat, {
+        document: { stream: fs.createReadStream(apkPath) },
+        fileName,
+        mimetype: 'application/vnd.android.package-archive',
+        fileLength: apkStat.size,
+        caption: `🩸 DENJI BOT 🩸\n\n🎮 *${card.name}*\n📌 v${card.version}\n💾 ${sizeMb} MB\n\n> ⚠️ Instala APKs solo de fuentes en las que confíes`
+      }, { quoted: m })
+
+      await m.react('🩸')
+
+    } catch (dlErr) {
+      // Si falló la descarga (muy pesado u otro error), mandar link como fallback
+      await conn.sendMessage(m.chat, {
+        text: `🩸 DENJI BOT 🩸\n\n⚠️ No pude enviar el APK directamente:\n_${dlErr.message}_\n\n📥 *Descárgalo manualmente:*\n${card.apkUrl}`
+      }, { quoted: m })
+      await m.react('⚠️')
+    } finally {
+      deleteSafe(apkPath)
+    }
+
     return true
 
   } catch (e) {
