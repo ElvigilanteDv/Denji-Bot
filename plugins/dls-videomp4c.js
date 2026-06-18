@@ -60,6 +60,7 @@ async function ytdlpDownload(youtubeUrl, quality, outputPath) {
 
   const args = [
     '--cookies', COOKIES_PATH,
+    '--js-runtimes', 'node',
     '-f', format,
     '--merge-output-format', 'mp4',
     '--no-playlist',
