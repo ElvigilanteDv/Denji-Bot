@@ -1,5 +1,5 @@
 // © 2026 EL VIGILANTE & BRAYANRK - DENJI BOT
-// HappyMod scraper
+// HappyMod scraper - busca via Google, scrapea download.happymod.to con cheerio
 import fetch from 'node-fetch'
 import * as cheerio from 'cheerio'
 import {
@@ -25,51 +25,127 @@ async function getHtml(url) {
   if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`)
   return res.text()
 }
+──
+
+// ─── Búsqueda Adaptada para happymod.to ────────────────────────────────────
 
 async function searchHappymod(query) {
-
+  // Apuntamos directamente a la URL de búsquedas de happymod.to
   const searchUrl = `https://happymod.to{encodeURIComponent(query)}`
-  const html = await getHtml(searchUrl)
-  const $ = cheerio.load(html)
-  const results = []
+  
+  try {
+    const html = await getHtml(searchUrl)
+    const $ = cheerio.load(html)
+    const results = []
 
-
-  $('.container .row .col-md-3, .container .row a').each((_, el) => {
-    const href = $(el).attr('href') || $(el).find('a').attr('href') || ''
-    const text = $(el).text().trim()
-    
-
-    const match = href.match(/(\/[^/]+-mod\/[^/]+\/?)/)
-    
-    if (match && results.length < 8) {
-      const path = match[1].replace(/\/$/, '')
-
-      const name = text.split('\n')[0].replace(/mod apk.*/i, '').replace(/download.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
+    // En happymod.to, los resultados usan la clase '.pdt-app-box' o enlaces directos '-mod/'
+    $('.pdt-app-box, .pd-list-item, a[href*="-mod/"]').each((_, el) => {
+      let href = $(el).attr('href') || $(el).find('a').attr('href') || ''
+      let text = $(el).text().trim()
       
+      if (!href) return
 
-      if (!results.find(r => r.path === path)) {
-        results.push({ name, path })
-      }
-    }
-  })
-
-
-  if (results.length === 0) {
-    $('a[href*="-mod/"]').each((_, el) => {
-      const href = $(el).attr('href') || ''
+      // Extraemos la ruta relativa del juego/app para tu comando
       const match = href.match(/(\/[^/]+-mod\/[^/]+\/?)/)
+      
       if (match && results.length < 8) {
         const path = match[1].replace(/\/$/, '')
-        const name = $(el).text().split('\n')[0].replace(/mod apk.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
+        
+        // Limpiamos los textos basura del título para WhatsApp
+        let name = text.split('\n')[0] 
+          .replace(/mod apk.*/i, '')
+          .replace(/download.*/i, '')
+          .trim()
+        
+        // Si el contenedor no tenía texto limpio, usamos el nombre de la URL
+        if (!name) {
+          name = path.split('/')[2]?.replace(/-/g, ' ') || 'Unknown App'
+        }
+        
+        // Evitamos meter la misma app dos veces en la lista
         if (!results.find(r => r.path === path)) {
           results.push({ name, path })
         }
       }
     })
-  }
 
-  return results
+    return results
+  } catch (error) {
+    console.error('[HAPPYMOD SEARCH ERROR]', error)
+    return [] 
+  }
 }
+
+
+// ─── Scraper de detalle de app (download.happymod.to) ────────────────────────
+
+async function getAppDetail(path) {
+  const url = `${BASE_DL}${path}/`
+  const html = await getHtml(url)
+  const $ = cheerio.load(html)
+
+  const name = $('h1').first().text().replace(/v[\d.]+\s*mod apk.*/i, '').replace(/mod apk.*/i, '').trim()
+  const icon = $('img').first().attr('src') || ''
+
+  const tableData = {}
+  $('table tr').each((_, row) => {
+    const cells = $(row).find('td')
+    if (cells.length >= 2) {
+      const key = $(cells[0]).text().trim().toLowerCase()
+      const val = $(cells[1]).text().trim()
+      tableData[key] = val
+    }
+  })
+
+  const version = tableData['version'] || ''
+  const modFeatures = tableData['mod feaures'] || tableData['mod features'] || tableData['mod'] || ''
+  const category = tableData['category'] || ''
+  const rating = tableData['rating'] || ''
+  const requires = tableData['requires'] || ''
+  const size = $('a[href*="download.html"]').first().text().match(/[\d.]+ MB/i)?.[0] || ''
+
+  return { name, icon, version, modFeatures, category, rating, requires, size, path }
+}
+
+
+async function getVersions(path) {
+  const url = `${BASE_DL}${path}/download.html`
+  const html = await getHtml(url)
+  const $ = cheerio.load(html)
+  const versions = []
+
+  $('a[href*="downloading.html"]').each((_, el) => {
+    const href = $(el).attr('href') || ''
+    const fullText = $(el).text().replace(/\s+/g, ' ').trim()
+
+    // Extraer versión del href
+    const vFromHref = href.match(/\/([^/]+)\/downloading\.html$/)
+    let version = vFromHref?.[1] || ''
+    if (version === 'downloading') version = '' 
+
+    const modText = fullText
+      .replace(/.*?v?[\d]+\.[\d.]+/i, '')
+      .replace(/^[\s-]+/, '')
+      .replace(/mod\s*/i, '')
+      .trim()
+      .substring(0, 50) || 'Mod APK'
+
+    if (!version) {
+      const vFromText = fullText.match(/v?([\d]+\.[\d.]+)/)
+      version = vFromText?.[1] || 'latest'
+    }
+
+    const hrefB64 = Buffer.from(href).toString('base64url')
+    const label = `v${version}${modText ? ' — ' + modText : ''}`.substring(0, 60)
+
+    if (!versions.find(v => v.href === href) && versions.length < 8) {
+      versions.push({ version, modText, href, label })
+    }
+  })
+
+  return versions
+}
+
 
 async function getMirrorLink(downloadingUrl) {
   const html = await getHtml(downloadingUrl)
@@ -113,7 +189,6 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     if (results.length === 1) {
       return await mostrarVersiones(conn, m, results[0].path, results[0].name)
     }
-
 
     const rows = results.map(app => {
       const pathB64 = Buffer.from(app.path).toString('base64url')
