@@ -49,9 +49,9 @@ function checkCookies() {
 }
 
 const qualityFormat = {
-  '480p':  'bestvideo[height<=480]+bestaudio/best[height<=480]',
-  '720p':  'bestvideo[height<=720]+bestaudio/best[height<=720]',
-  '1080p': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
+  '480p':  'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
+  '720p':  'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+  '1080p': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
 }
 
 async function ytdlpDownload(youtubeUrl, quality, outputPath) {
