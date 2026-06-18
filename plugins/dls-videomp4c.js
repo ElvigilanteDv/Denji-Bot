@@ -135,6 +135,31 @@ async function fixVideoForWhatsapp(inputPath) {
   await reencodeH264(inputPath, outputPath)
   return outputPath
 }
+async function sendVideoWithRetry(conn, chat, quoted, videoBuffer, fileName, caption, intentos = 3) {
+  for (let i = 1; i <= intentos; i++) {
+    try {
+      await conn.sendMessage(chat, {
+        video: videoBuffer,
+        fileName,
+        mimetype: 'video/mp4',
+        caption
+      }, { quoted })
+      return 'video'
+    } catch (e) {
+      console.log(`[VIDEOC] intento ${i} de envío falló:`, e.message)
+      if (i < intentos) await new Promise(r => setTimeout(r, 3000))
+    }
+  }
+
+  // Si después de varios intentos sigue fallando, mándalo como documento (más tolerante a fallos de subida)
+  await conn.sendMessage(chat, {
+    document: videoBuffer,
+    fileName,
+    mimetype: 'video/mp4',
+    caption: caption + '\n\n📦 Enviado como documento porque el envío como video falló varias veces.'
+  }, { quoted })
+  return 'document'
+}
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   const input = text?.trim()
@@ -287,13 +312,15 @@ handler.before = async (m, { conn }) => {
         fixedPath = await fixVideoForWhatsapp(rawPath)
         const videoBuffer = await fs.promises.readFile(fixedPath)
 
-        await conn.sendMessage(m.chat, {
-          video: videoBuffer,
-          fileName: finalTitle + '.mp4',
-          mimetype: 'video/mp4',
-          caption: `🩸 DENJI BOT 🩸\n\n🔪 Video descargado (cookies)\n\n💀 ${finalTitle}\n💀 Calidad: *${quality}*`
-        }, { quoted: m })
-        await m.react('🩸')
+        await sendVideoWithRetry(
+  conn,
+  m.chat,
+  m,
+  videoBuffer,
+  finalTitle + '.mp4',
+  `🩸 DENJI BOT 🩸\n\n🔪 Video descargado (cookies)\n\n💀 ${finalTitle}\n💀 Calidad: *${quality}*`
+)
+await m.react('🩸')
       } finally {
         deleteSafe(rawPath)
         deleteSafe(fixedPath)
