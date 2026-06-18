@@ -62,7 +62,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       } catch {}
     }
 
-    const caption = `🩸 DENJI BOT 🩸\n\n🔪 Nombre: *${name}*\n💀 Paquete: *${id}*\n💀 Actualización: *${lastup}*\n💀 Tamaño: *${size}*\n\n> Scraper por *Hinata*`
+    const caption = `🩸 DENJI BOT 🩸\n\n🔪 Nombre: *${name}*\n💀 Paquete: *${id}*\n💀 Actualización: *${lastup}*\n💀 Tamaño: *${size}*\n\n> Scraper por *por mi pene de 24cm*`
 
     await conn.sendMessage(m.chat, {
       document: { url: downloadUrl },
