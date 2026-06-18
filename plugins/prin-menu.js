@@ -6,7 +6,7 @@ import fetch from 'node-fetch'
 const charset = { a:'ᴀ',b:'ʙ',c:'ᴄ',d:'ᴅ',e:'ᴇ',f:'ꜰ',g:'ɢ',h:'ʜ',i:'ɪ',j:'ᴊ',k:'ᴋ',l:'ʟ',m:'ᴍ',n:'ɴ',o:'ᴏ',p:'ᴘ',q:'ǫ',r:'ʀ',s:'ꜱ',t:'ᴛ',u:'ᴜ',v:'ᴠ',w:'ᴡ',x:'x',y:'ʏ',z:'ᴢ' }
 const textCyberpunk = t => t.replace(/[a-z]/gi, c => charset[c.toLowerCase()] || c)
 
-// Orden fijo de categorías, igual al sistema que armamos en Denji
+// Orden fijo de categorías
 const tagLabels = {
   main:       'Principal',
   group:      'Grupos',
@@ -23,28 +23,32 @@ const tagLabels = {
   info:       'Info'
 }
 
-// Cualquier tag que no esté en tagLabels cae aquí, así nunca se pierde un comando
 const FALLBACK_LABEL = 'Otros'
 
 const defaultMenu = {
   before: `
-ʜɪɴᴀᴛᴀ ʙᴏᴛ
-
-Usuario   : %name
-Exp       : %exp / %maxexp
-Comandos  : %totalcmd
-Modo      : %mode
-Activo    : %muptime
-Usuarios  : %totalreg
-
-Enlaces
-  API     : https://elvigilante-api.onrender.com/dash
-  GitHub  : https://github.com/ElvigilanteDv/Hinata-bot
-
+࿇ ══━━━✥◈✥━━━══ ࿇
+    𝕯𝖊𝖓𝖏𝖎 𝕭𝖔𝖙
+࿇ ══━━━✥◈✥━━━══ ࿇
+𖣔 ɪɴꜰᴏ ˚ʚ♡ɞ˚
+❧ Usuario
+> %name
+❧ Experiencia
+> %exp / %maxexp
+❧ Comandos
+> %totalcmd
+❧ Modo
+> %mode
+❧ Activo
+> %muptime
+❧ Registrados
+> %totalreg
 %readmore
 `.trim(),
-  header: '\n%category',
-  after: '\nHinata Bot\n\nCreadores\n  El Vigilante\n  BrayanRK'
+  header: '\n𖣔 %category ˚ʚ♡ɞ˚',
+  body: '❧ %cmd',
+  footer: '⸻⸻⸻⸻⸻⸻',
+  after: '\n࿇ ══━━━✥◈✥━━━══ ࿇\n   𝕯𝖊𝖓𝖏𝖎 𝕭𝖔𝖙\n࿇ ══━━━✥◈✥━━━══ ࿇\n\n𖣔 ᴄʀᴇᴀᴅᴏʀ ˚ʚ♡ɞ˚\n❧ JM'
 }
 
 const menuDir = './media/menu'
@@ -60,21 +64,15 @@ const loadMenuMedia = jid => {
 }
 
 const fetchBuffer = url => fetch(url).then(r => r.arrayBuffer()).then(b => Buffer.from(b))
-const defaultThumb = await fetchBuffer('https://files.catbox.moe/mln8cc.png')
+const defaultThumb = await fetchBuffer('https://files.catbox.moe/ks2023.jpg')
 
 const clockString = ms =>
   [3600000, 60000, 1000].map((v, i) =>
     String(Math.floor(ms / v) % (i ? 60 : 99)).padStart(2, '0')
   ).join(':')
 
-// Una línea por comando, con descripción indentada debajo si existe
-const buildCommandLine = (p, h, prefix) => {
-  const cmd = p.prefix ? h : prefix + h
-  return p.desc ? `  ${cmd}\n    ${p.desc}` : `  ${cmd}`
-}
-
 let handler = async (m, { conn, usedPrefix }) => {
-  await conn.sendMessage(m.chat, { react: { text: '❧', key: m.key } })
+  await conn.sendMessage(m.chat, { react: { text: '🩸', key: m.key } })
 
   const botJid = conn.user.jid
   const menuMedia = loadMenuMedia(botJid)
@@ -107,18 +105,21 @@ let handler = async (m, { conn, usedPrefix }) => {
   const buildSection = (label, matched) => {
     if (!matched.length) return ''
     const cmds = matched
-      .flatMap(p => p.help.map(h => buildCommandLine(p, h, usedPrefix)))
+      .flatMap(p => p.help.map(h => {
+        const cmd = p.prefix ? h : usedPrefix + h
+        return menu.body.replace('%cmd', cmd) + (p.desc ? `\n> ${p.desc}` : '')
+      }))
       .sort((a, b) => a.localeCompare(b))
       .join('\n')
     const header = menu.header.replace('%category', textCyberpunk(label))
-    return `${header}\n${cmds}`
+    return `${header}\n${cmds}\n${menu.footer}`
   }
 
   const secciones = Object.entries(tagLabels)
     .map(([tag, label]) => buildSection(label, pluginList.filter(p => p.tags.includes(tag))))
     .filter(Boolean)
 
-  // Tags que no estén declarados en tagLabels van a "Otros" en vez de desaparecer
+  // Tags que no estén en tagLabels van a "Otros" en vez de desaparecer
   const huerfanos = pluginList.filter(p => !p.tags.some(t => tagLabels[t]))
   const seccionHuerfanos = buildSection(FALLBACK_LABEL, huerfanos)
   if (seccionHuerfanos) secciones.push(seccionHuerfanos)
@@ -134,7 +135,7 @@ let handler = async (m, { conn, usedPrefix }) => {
   await conn.sendMessage(m.chat, {
     image: thumb,
     caption: text,
-    footer: 'HINATA SYSTEM',
+    footer: 'DENJI SYSTEM',
     headerType: 4
   })
 }
