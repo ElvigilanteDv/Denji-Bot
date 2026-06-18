@@ -373,7 +373,7 @@ handler.before = async (m, { conn }) => {
 
 handler.help = ['apk3']
 handler.tags = ['downloader']
-handler.command = /^(happymod|hmod|modapk)$/i
+handler.command = /^(apk3|hmod|modapk)$/i
 handler.desc = 'Busca y descarga MOD APKs de HappyMod (happymod.to)'
 
 export default handler
