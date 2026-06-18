@@ -177,9 +177,9 @@ handler.before = async (m, { conn }) => {
   }
 }
 
-handler.help = ['apk']
+handler.help = ['apk2']
 handler.tags = ['downloader']
-handler.command = /^(apk|aptoide|apkdl)$/i
+handler.command = /^(apk2|aptoide|apkdl)$/i
 handler.desc = 'Busca y descarga APKs de Aptoide con selección interactiva'
 
 export default handler
