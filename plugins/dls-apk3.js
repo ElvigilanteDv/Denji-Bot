@@ -16,6 +16,15 @@ const SEP = '|~|'
 const BASE = 'https://download.happymod.to'
 const UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'
 
+// Carpeta temporal local del proyecto, evita EACCES en /tmp dentro de Termux
+const TEMP_DIR = path.join(process.cwd(), 'tmp')
+
+function ensureTempDir() {
+  if (!fs.existsSync(TEMP_DIR)) {
+    fs.mkdirSync(TEMP_DIR, { recursive: true })
+  }
+}
+
 async function getHtml(url) {
   const res = await fetch(url, {
     headers: {
@@ -33,6 +42,8 @@ async function getHtml(url) {
 async function downloadFile(url, outPath, redirectCount = 0) {
   if (redirectCount > 8) throw new Error('Demasiados redirects')
 
+  fs.mkdirSync(path.dirname(outPath), { recursive: true })
+
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https:') ? https : http
     const file = fs.createWriteStream(outPath)
@@ -40,7 +51,8 @@ async function downloadFile(url, outPath, redirectCount = 0) {
     const req = client.get(url, {
       headers: {
         'User-Agent': UA,
-        'Referer': url
+        'Referer': url,
+        'Accept': '*/*'
       }
     }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -56,6 +68,10 @@ async function downloadFile(url, outPath, redirectCount = 0) {
 
       res.pipe(file)
       file.on('finish', () => file.close(() => resolve(outPath)))
+      file.on('error', err => {
+        file.close(() => fs.unlink(outPath, () => {}))
+        reject(err)
+      })
     })
 
     req.on('error', err => {
@@ -80,18 +96,18 @@ async function searchHappymod(query) {
       const match = href.match(/(\/[^/]+-mod\/[^/]+\/?)/)
       if (!match) return
 
-      const path = match[1].replace(/\/$/, '')
+      const appPath = match[1].replace(/\/$/, '')
       let name = text
         .replace(/mod apk.*/i, '')
         .replace(/download.*/i, '')
         .trim()
 
       if (!name) {
-        name = path.split('/')[2]?.replace(/-/g, ' ') || 'Unknown App'
+        name = appPath.split('/')[2]?.replace(/-/g, ' ') || 'Unknown App'
       }
 
-      if (!results.find(r => r.path === path) && results.length < 8) {
-        results.push({ name, path })
+      if (!results.find(r => r.path === appPath) && results.length < 8) {
+        results.push({ name, path: appPath })
       }
     })
 
@@ -102,8 +118,8 @@ async function searchHappymod(query) {
   }
 }
 
-async function getAppDetail(pathUrl) {
-  const url = `${BASE}${pathUrl}/`
+async function getAppDetail(appPath) {
+  const url = `${BASE}${appPath}/`
   const html = await getHtml(url)
   const $ = cheerio.load(html)
 
@@ -131,11 +147,11 @@ async function getAppDetail(pathUrl) {
   const requires = tableData['requires'] || ''
   const size = $('a[href*="download.html"]').first().text().match(/[\d.]+\s?MB/i)?.[0] || ''
 
-  return { name, icon, version, modFeatures, category, rating, requires, size, path: pathUrl }
+  return { name, icon, version, modFeatures, category, rating, requires, size, path: appPath }
 }
 
-async function getVersions(pathUrl) {
-  const url = `${BASE}${pathUrl}/download.html`
+async function getVersions(appPath) {
+  const url = `${BASE}${appPath}/download.html`
   const html = await getHtml(url)
   const $ = cheerio.load(html)
   const versions = []
@@ -160,11 +176,13 @@ async function getVersions(pathUrl) {
       .trim()
       .substring(0, 50) || 'Mod APK'
 
-    if (!versions.find(v => v.href === href) && versions.length < 8) {
+    const absoluteHref = /^https?:\/\//i.test(href) ? href : new URL(href, `${BASE}${appPath}/download.html`).toString()
+
+    if (!versions.find(v => v.href === absoluteHref) && versions.length < 8) {
       versions.push({
         version,
         modText,
-        href,
+        href: absoluteHref,
         label: `v${version}${modText ? ' — ' + modText : ''}`.substring(0, 60)
       })
     }
@@ -191,10 +209,12 @@ async function getMirrorLink(downloadingUrl) {
 
     if (
       href.includes('.apk') ||
+      href.includes('.xapk') ||
       href.includes('download') ||
       href.includes('server') ||
       text.includes('download') ||
-      text.includes('apk')
+      text.includes('apk') ||
+      text.includes('xapk')
     ) {
       candidates.push(href)
     }
@@ -202,12 +222,13 @@ async function getMirrorLink(downloadingUrl) {
 
   const normalized = [...new Set(candidates)]
     .map(u => /^https?:\/\//i.test(u) ? u : new URL(u, downloadingUrl).toString())
-    .filter(u => /apk|download|server|downloading/i.test(u))
+    .filter(u => /apk|xapk|download|server|downloading/i.test(u))
 
   if (normalized.length) return normalized[0]
 
   const htmlMatch =
     html.match(/https?:\/\/[^"'`\s>]+\.apk[^"'`\s>]*/i) ||
+    html.match(/https?:\/\/[^"'`\s>]+\.xapk[^"'`\s>]*/i) ||
     html.match(/https?:\/\/[^"'`\s>]+download[^"'`\s>]*/i)
 
   if (htmlMatch?.[0]) return htmlMatch[0]
@@ -215,10 +236,10 @@ async function getMirrorLink(downloadingUrl) {
   return downloadingUrl
 }
 
-async function mostrarVersiones(conn, m, pathUrl, appName) {
-  const detail = await getAppDetail(pathUrl)
+async function mostrarVersiones(conn, m, appPath, appName) {
+  const detail = await getAppDetail(appPath)
   const name = detail.name || appName
-  const versions = await getVersions(pathUrl)
+  const versions = await getVersions(appPath)
 
   const infoLines = [
     '🩸 DENJI BOT 🩸',
@@ -236,7 +257,7 @@ async function mostrarVersiones(conn, m, pathUrl, appName) {
 
   if (!versions.length) {
     await conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n💀 No se encontraron versiones\n\n📥 Descarga manual:\n${BASE}${pathUrl}/download.html`
+      text: `🩸 DENJI BOT 🩸\n\n💀 No se encontraron versiones\n\n📥 Descarga manual:\n${BASE}${appPath}/download.html`
     }, { quoted: m })
     await m.react('💀')
     return
@@ -314,14 +335,12 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       return await mostrarVersiones(conn, m, results[0].path, results[0].name)
     }
 
-    const rows = results.map(app => {
-      return {
-        header: '😈',
-        title: app.name.substring(0, 35),
-        description: app.path.split('/')[2] || 'mod apk',
-        id: 'hmod' + SEP + Buffer.from(app.path).toString('base64url') + SEP + Buffer.from(app.name).toString('base64url')
-      }
-    })
+    const rows = results.map(app => ({
+      header: '😈',
+      title: app.name.substring(0, 35),
+      description: app.path.split('/')[2] || 'mod apk',
+      id: 'hmod' + SEP + Buffer.from(app.path).toString('base64url') + SEP + Buffer.from(app.name).toString('base64url')
+    }))
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
       header: {
@@ -407,16 +426,24 @@ handler.before = async (m, { conn }) => {
 
       if (!directUrl) directUrl = downloadingUrl
 
-      const fileName = path.join('/tmp', `happymod-${Date.now()}.apk`)
+      ensureTempDir()
+      const ext = /\.xapk(\?|$)/i.test(directUrl) ? '.xapk' : '.apk'
+      const fileName = path.join(TEMP_DIR, `happymod-${Date.now()}${ext}`)
 
       try {
+        await conn.sendMessage(m.chat, {
+          text: `🩸 DENJI BOT 🩸\n\n📥 Descargando archivo...\n> Esto puede tardar un poco`
+        }, { quoted: m })
+
         await downloadFile(directUrl, fileName)
 
         await conn.sendMessage(m.chat, {
           document: fs.readFileSync(fileName),
-          mimetype: 'application/vnd.android.package-archive',
-          fileName: 'HappyMod.apk',
-          caption: `🩸 DENJI BOT 🩸\n\n😈 *MOD APK — HappyMod*`
+          mimetype: ext === '.xapk'
+            ? 'application/octet-stream'
+            : 'application/vnd.android.package-archive',
+          fileName: `HappyMod${ext}`,
+          caption: `🩸 DENJI BOT 🩸\n\n😈 *MOD ${ext.toUpperCase().replace('.', '')} — HappyMod*`
         }, { quoted: m })
 
         fs.unlink(fileName, () => {})
@@ -425,7 +452,7 @@ handler.before = async (m, { conn }) => {
         console.error('[HAPPYMOD DOWNLOAD]', e)
 
         await conn.sendMessage(m.chat, {
-          text: `🩸 DENJI BOT 🩸\n\n⚠️ No se pudo descargar el APK automáticamente.\n\n📥 Abre esto manualmente:\n${downloadingUrl}`
+          text: `🩸 DENJI BOT 🩸\n\n⚠️ No se pudo descargar el archivo automáticamente.\n\n📥 Abre esto manualmente:\n${downloadingUrl}`
         }, { quoted: m })
 
         await m.react('⚠️')
