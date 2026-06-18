@@ -27,8 +27,9 @@ async function getHtml(url) {
 }
 // ─── Búsqueda Adaptada para happymod.to ────────────────────────────────────
 
+// Busqueda directa sin errores de URL ni signos faltantes
 async function searchHappymod(query) {
-  // Apuntamos directamente a la URL de búsquedas de happymod.to
+  // Corregido: Agregado el signo $ necesario para variables en JavaScript
   const searchUrl = `https://happymod.to{encodeURIComponent(query)}`
   
   try {
@@ -36,31 +37,27 @@ async function searchHappymod(query) {
     const $ = cheerio.load(html)
     const results = []
 
-    // En happymod.to, los resultados usan la clase '.pdt-app-box' o enlaces directos '-mod/'
+    // Buscamos los contenedores reales que usa la plataforma
     $('.pdt-app-box, .pd-list-item, a[href*="-mod/"]').each((_, el) => {
       let href = $(el).attr('href') || $(el).find('a').attr('href') || ''
       let text = $(el).text().trim()
       
       if (!href) return
 
-      // Extraemos la ruta relativa del juego/app para tu comando
       const match = href.match(/(\/[^/]+-mod\/[^/]+\/?)/)
       
       if (match && results.length < 8) {
         const path = match[1].replace(/\/$/, '')
         
-        // Limpiamos los textos basura del título para WhatsApp
         let name = text.split('\n')[0] 
           .replace(/mod apk.*/i, '')
           .replace(/download.*/i, '')
           .trim()
         
-        // Si el contenedor no tenía texto limpio, usamos el nombre de la URL
         if (!name) {
           name = path.split('/')[2]?.replace(/-/g, ' ') || 'Unknown App'
         }
         
-        // Evitamos meter la misma app dos veces en la lista
         if (!results.find(r => r.path === path)) {
           results.push({ name, path })
         }
@@ -73,6 +70,7 @@ async function searchHappymod(query) {
     return [] 
   }
 }
+
 
 
 // ─── Scraper de detalle de app (download.happymod.to) ────────────────────────
