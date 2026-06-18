@@ -1,5 +1,5 @@
 // © 2026 EL VIGILANTE & BRAYANRK - DENJI BOT
-// HappyMod scraper con cheerio - No quitar créditos
+// HappyMod scraper - busca via Google, scrapea download.happymod.to con cheerio
 import fetch from 'node-fetch'
 import * as cheerio from 'cheerio'
 import {
@@ -8,149 +8,167 @@ import {
 } from '@whiskeysockets/baileys'
 
 const SEP = '|~|'
-const BASE_SEARCH = 'https://happymod.to'
 const BASE_DL = 'https://download.happymod.to'
 const UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'
 
-// ─── Helpers de fetch ────────────────────────────────────────────────────────
+// ─── Fetch helper ─────────────────────────────────────────────────────────────
 
 async function getHtml(url) {
   const res = await fetch(url, {
     headers: {
       'User-Agent': UA,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-      'Referer': BASE_SEARCH
+      'Accept-Language': 'en-US,en;q=0.9',
     },
     redirect: 'follow',
-    timeout: 15000
+    timeout: 20000
   })
   if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`)
   return res.text()
 }
 
-// ─── Scraper de búsqueda ─────────────────────────────────────────────────────
+// ─── Búsqueda via DuckDuckGo HTML (sin API, sin bloqueos) ────────────────────
 
 async function searchHappymod(query) {
-  const url = `${BASE_SEARCH}/search/?q=${encodeURIComponent(query)}`
-  const html = await getHtml(url)
+  // DuckDuckGo lite devuelve HTML estático, sin JS
+  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent('site:download.happymod.to ' + query + ' mod apk')}`
+  const html = await getHtml(searchUrl)
   const $ = cheerio.load(html)
   const results = []
 
-  // Cada resultado de búsqueda en happymod.to
-  $('li.app-info-item, .search-list li, .mod-list li, .app-list li, li[class*="mod"], li[class*="app"]').each((_, el) => {
-    const $el = $(el)
-    const link = $el.find('a').first().attr('href') || ''
-    const name = $el.find('.name, h3, .title, strong').first().text().trim()
-    const pkg = $el.find('.package, .pkg, small').first().text().trim()
-    const icon = $el.find('img').first().attr('src') || $el.find('img').first().attr('data-src') || ''
-    const mod = $el.find('.mod-info, .mod, .features, em').first().text().trim()
-    if (link && name) {
-      results.push({ name, link, pkg, icon, mod })
+  $('.result__title a, .result a.result__url').each((_, el) => {
+    const href = $(el).attr('href') || ''
+    const text = $(el).text().trim()
+    // Filtrar solo URLs de download.happymod.to con estructura de app
+    const match = href.match(/download\.happymod\.to(\/[^/]+-mod\/[^/]+\/?)/)
+    if (match && results.length < 8) {
+      const path = match[1].replace(/\/$/, '')
+      // Nombre limpio del título
+      const name = text.replace(/mod apk.*/i, '').replace(/download.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
+      // Evitar duplicados por path
+      if (!results.find(r => r.path === path)) {
+        results.push({ name, path })
+      }
     }
   })
 
-  // Fallback: buscar cualquier enlace de app en la página
-  if (!results.length) {
-    $('a[href*="-mod/"]').each((_, el) => {
-      const $el = $(el)
-      const link = $el.attr('href') || ''
-      const name = $el.find('img').attr('alt') || $el.text().trim() || ''
-      const icon = $el.find('img').attr('src') || $el.find('img').attr('data-src') || ''
-      if (link && name && !link.includes('javascript') && results.length < 8) {
-        results.push({ name: name.replace(/mod apk.*/i, '').trim(), link, pkg: '', icon, mod: '' })
+  // Fallback: extraer de los snippets también
+  if (results.length < 3) {
+    $('a[href*="download.happymod.to"]').each((_, el) => {
+      const href = $(el).attr('href') || ''
+      const match = href.match(/download\.happymod\.to(\/[^/]+-mod\/[^/]+\/?)/)
+      if (match && results.length < 8) {
+        const path = match[1].replace(/\/$/, '')
+        const name = $(el).text().replace(/mod apk.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
+        if (!results.find(r => r.path === path)) {
+          results.push({ name, path })
+        }
       }
     })
   }
 
-  return results.slice(0, 8)
+  return results
 }
 
-// ─── Scraper de detalle de app ───────────────────────────────────────────────
+// ─── Scraper de detalle de app (download.happymod.to) ────────────────────────
 
-async function getAppDetail(appPath) {
-  // appPath es el path relativo como /minecraft-pocket-edition.../com.mojang.minecraftpe/
-  // Usamos el subdominio download que tiene mejor estructura
-  const cleanPath = appPath.replace(/^https?:\/\/[^/]+/, '').replace(/\/$/, '')
-  const url = `${BASE_DL}${cleanPath}/`
+async function getAppDetail(path) {
+  const url = `${BASE_DL}${path}/`
   const html = await getHtml(url)
   const $ = cheerio.load(html)
 
-  const name = $('h1').first().text().replace(/mod apk/i, '').trim() ||
-               $('title').text().replace(/mod apk.*/i, '').trim()
+  const name = $('h1').first().text().replace(/v[\d.]+\s*mod apk.*/i, '').replace(/mod apk.*/i, '').trim()
   const icon = $('img').first().attr('src') || ''
-  const version = $('table tr, .info-table tr').filter((_, el) =>
-    /version/i.test($(el).find('td').first().text())
-  ).find('td').last().text().trim() || ''
-  const size = $('a[href*="download.html"]').first().text().match(/[\d.]+\s*MB/i)?.[0] || ''
-  const rating = $('table tr').filter((_, el) =>
-    /rating/i.test($(el).find('td').first().text())
-  ).find('td').last().text().trim() || ''
-  const modFeatures = $('table tr').filter((_, el) =>
-    /mod feat/i.test($(el).find('td').first().text())
-  ).find('td').last().text().trim() || ''
-  const category = $('table tr').filter((_, el) =>
-    /categ/i.test($(el).find('td').first().text())
-  ).find('td').last().text().trim() || ''
-  const requires = $('table tr').filter((_, el) =>
-    /requir/i.test($(el).find('td').first().text())
-  ).find('td').last().text().trim() || ''
 
-  // Descarga: link al download.html de esta app
-  const dlPageUrl = `${BASE_DL}${cleanPath}/download.html`
+  // Tabla de info
+  const tableData = {}
+  $('table tr').each((_, row) => {
+    const cells = $(row).find('td')
+    if (cells.length >= 2) {
+      const key = $(cells[0]).text().trim().toLowerCase()
+      const val = $(cells[1]).text().trim()
+      tableData[key] = val
+    }
+  })
 
-  return { name, icon, version, size, rating, modFeatures, category, requires, dlPageUrl, appPath: cleanPath }
+  const version = tableData['version'] || ''
+  const modFeatures = tableData['mod feaures'] || tableData['mod features'] || tableData['mod'] || ''
+  const category = tableData['category'] || ''
+  const rating = tableData['rating'] || ''
+  const requires = tableData['requires'] || ''
+  const size = $('a[href*="download.html"]').first().text().match(/[\d.]+ MB/i)?.[0] || ''
+
+  return { name, icon, version, modFeatures, category, rating, requires, size, path }
 }
 
-// ─── Scraper de versiones disponibles ────────────────────────────────────────
+// ─── Scraper de versiones (download.html) ────────────────────────────────────
 
-async function getVersions(cleanPath) {
-  const dlPageUrl = `${BASE_DL}${cleanPath}/download.html`
-  const html = await getHtml(dlPageUrl)
+async function getVersions(path) {
+  const url = `${BASE_DL}${path}/download.html`
+  const html = await getHtml(url)
   const $ = cheerio.load(html)
   const versions = []
 
-  // Los links de versiones en download.html apuntan a /version/downloading.html
   $('a[href*="downloading.html"]').each((_, el) => {
     const href = $(el).attr('href') || ''
-    const text = $(el).text().replace(/\s+/g, ' ').trim()
-    // Extraer versión del href o del texto
-    const vMatch = href.match(/\/([^/]+)\/downloading\.html/) || text.match(/v([\d.]+)/)
-    const version = vMatch?.[1] || text.substring(0, 40)
-    // Extraer mods del texto
-    const modText = text.replace(/minecraft.*?v?[\d.]+/i, '').replace(/mod/i, '').trim()
-    if (href && version && versions.length < 6) {
-      versions.push({ version, modText: modText || 'Mod', href })
+    const fullText = $(el).text().replace(/\s+/g, ' ').trim()
+
+    // Extraer versión del href
+    const vFromHref = href.match(/\/([^/]+)\/downloading\.html$/)
+    let version = vFromHref?.[1] || ''
+    if (version === 'downloading') version = '' // href raíz = versión más reciente
+
+    // Extraer mods del texto (lo que viene después de la versión)
+    const modText = fullText
+      .replace(/.*?v?[\d]+\.[\d.]+/i, '')
+      .replace(/^[\s-]+/, '')
+      .replace(/mod\s*/i, '')
+      .trim()
+      .substring(0, 50) || 'Mod APK'
+
+    // Extraer versión del texto si no la tenemos
+    if (!version) {
+      const vFromText = fullText.match(/v?([\d]+\.[\d.]+)/)
+      version = vFromText?.[1] || 'latest'
+    }
+
+    const hrefB64 = Buffer.from(href).toString('base64url')
+    const label = `v${version}${modText ? ' — ' + modText : ''}`.substring(0, 60)
+
+    if (!versions.find(v => v.href === href) && versions.length < 8) {
+      versions.push({ version, modText, href, label })
     }
   })
 
   return versions
 }
 
-// ─── Obtener link de descarga del mirror ─────────────────────────────────────
+// ─── Obtener mirror de happymod.net desde la página downloading ───────────────
 
-async function getDirectDownload(downloadingUrl) {
+async function getMirrorLink(downloadingUrl) {
   const html = await getHtml(downloadingUrl)
   const $ = cheerio.load(html)
 
-  // El mirror en happymod.net sí da link directo
-  const mirror = $('a[href*="happymod.net"][href*="download"]').attr('href') ||
-                 $('a[href*="/download.html"]').filter((_, el) =>
-                   $(el).attr('href')?.includes('happymod.net')
-                 ).attr('href') || ''
+  // Buscar link mirror en happymod.net
+  const mirror = $('a[href*="happymod.net"]').filter((_, el) => {
+    const href = $(el).attr('href') || ''
+    return href.includes('download')
+  }).attr('href')
 
-  // También buscar en el texto de la página
-  const mirrorMatch = html.match(/https:\/\/happymod\.net\/[^"'\s]+download\.html/)
-  return mirror || mirrorMatch?.[0] || ''
+  if (mirror) return mirror
+
+  // Buscar en el HTML crudo
+  const match = html.match(/https?:\/\/happymod\.net\/[^"'\s]+download[^"'\s]*/i)
+  return match?.[0] || ''
 }
 
-// ─── Handler principal ───────────────────────────────────────────────────────
+// ─── Handler principal ────────────────────────────────────────────────────────
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   const query = text?.trim()
 
   if (!query) return conn.sendMessage(m.chat, {
-    text: `🩸 DENJI BOT 🩸\n\n😈 *HappyMod APK Scraper*\nMODs, hacks y APKs modificados\n\n> ${usedPrefix}${command} <nombre del juego/app>\n> Ejemplo: ${usedPrefix}${command} minecraft`
+    text: `🩸 DENJI BOT 🩸\n\n😈 *HappyMod MOD APK Scraper*\n\n> ${usedPrefix}${command} <nombre del juego/app>\n> Ejemplo: ${usedPrefix}${command} minecraft`
   }, { quoted: m })
 
   await m.react('🩸')
@@ -165,24 +183,23 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     if (!results.length) {
       await m.react('💀')
       return conn.sendMessage(m.chat, {
-        text: `🩸 DENJI BOT 🩸\n\n💀 Sin resultados para *${query}* en HappyMod\n> Prueba con otro nombre`
+        text: `🩸 DENJI BOT 🩸\n\n💀 Sin resultados para *${query}* en HappyMod\n> Prueba con otro nombre o en inglés`
       }, { quoted: m })
     }
 
-    // Si hay 1 solo resultado, ir directo al detalle
     if (results.length === 1) {
-      return await mostrarDetalle(conn, m, results[0].link, results[0].name)
+      return await mostrarVersiones(conn, m, results[0].path, results[0].name)
     }
 
-    // Mostrar lista con botones
+    // Botones con resultados
     const rows = results.map(app => {
-      const linkB64 = Buffer.from(app.link).toString('base64url')
+      const pathB64 = Buffer.from(app.path).toString('base64url')
       const nameB64 = Buffer.from(app.name).toString('base64url')
       return {
         header: '😈',
         title: app.name.substring(0, 35),
-        description: (app.mod || app.pkg || 'MOD APK').substring(0, 50),
-        id: 'hmod' + SEP + linkB64 + SEP + nameB64
+        description: app.path.split('/')[2] || 'mod apk',
+        id: 'hmod' + SEP + pathB64 + SEP + nameB64
       }
     })
 
@@ -216,75 +233,66 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   }
 }
 
-// ─── Mostrar detalle + versiones de una app ───────────────────────────────────
+// ─── Mostrar detalle + versiones ──────────────────────────────────────────────
 
-async function mostrarDetalle(conn, m, appLink, appName) {
-  try {
-    const detail = await getAppDetail(appLink)
-    const versions = await getVersions(detail.appPath)
+async function mostrarVersiones(conn, m, path, appName) {
+  const detail = await getAppDetail(path)
+  const name = detail.name || appName
 
-    const infoLines = [
-      '🩸 DENJI BOT 🩸',
-      '',
-      `😈 *${detail.name || appName}*`,
-      detail.version ? `📌 Versión: ${detail.version}` : '',
-      detail.modFeatures ? `🔥 MOD: ${detail.modFeatures}` : '',
-      detail.category ? `🗂️ Categoría: ${detail.category}` : '',
-      detail.size ? `💾 Tamaño: ${detail.size}` : '',
-      detail.rating ? `⭐ Rating: ${detail.rating}` : '',
-      detail.requires ? `📱 Android: ${detail.requires}` : '',
-    ].filter(Boolean).join('\n')
+  const infoLines = [
+    '🩸 DENJI BOT 🩸', '',
+    `😈 *${name}*`,
+    detail.version    ? `📌 Versión: ${detail.version}` : '',
+    detail.modFeatures? `🔥 MOD: ${detail.modFeatures}` : '',
+    detail.category   ? `🗂️ Categoría: ${detail.category}` : '',
+    detail.size       ? `💾 Tamaño: ${detail.size}` : '',
+    detail.rating     ? `⭐ Rating: ${detail.rating}` : '',
+    detail.requires   ? `📱 Android: ${detail.requires}` : '',
+  ].filter(Boolean).join('\n')
 
-    await conn.sendMessage(m.chat, { text: infoLines }, { quoted: m })
+  await conn.sendMessage(m.chat, { text: infoLines }, { quoted: m })
 
-    if (!versions.length) {
-      await conn.sendMessage(m.chat, {
-        text: `🩸 DENJI BOT 🩸\n\n💀 No se encontraron versiones descargables\n> Revisa manualmente: ${detail.dlPageUrl}`
-      }, { quoted: m })
-      await m.react('💀')
-      return
-    }
+  const versions = await getVersions(path)
 
-    // Mostrar versiones disponibles como botones
-    const rows = versions.map(v => {
-      const hrefB64 = Buffer.from(v.href).toString('base64url')
-      const label = `v${v.version} — ${v.modText}`.substring(0, 35)
-      return {
-        header: '💾',
-        title: label,
-        description: v.modText.substring(0, 50) || 'MOD APK',
-        id: 'hmoddl' + SEP + hrefB64
-      }
-    })
-
-    const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: 'HAPPYMOD - VERSIONES', subtitle: detail.name || appName, hasMediaAttachment: false },
-      body: { text: `🩸 DENJI BOT 🩸\n\n😈 *${detail.name || appName}*\n💀 ${rows.length} versiones disponibles\n\n> Elige cuál descargar` },
-      footer: { text: '🩸 DENJI BOT 🩸 | happymod.to' },
-      nativeFlowMessage: {
-        buttons: [{
-          name: 'single_select',
-          buttonParamsJson: JSON.stringify({
-            title: '💾 VERSIONES MOD',
-            sections: [{ title: 'ELIGE UNA', rows }]
-          })
-        }]
-      }
-    })
-
-    const msg = generateWAMessageFromContent(m.chat, {
-      viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } }
+  if (!versions.length) {
+    await conn.sendMessage(m.chat, {
+      text: `🩸 DENJI BOT 🩸\n\n💀 No se encontraron versiones\n> Descarga manual:\n${BASE_DL}${path}/download.html`
     }, { quoted: m })
-
-    await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
-    await m.react('🩸')
-
-  } catch (e) {
-    throw e
+    await m.react('💀')
+    return
   }
+
+  const rows = versions.map(v => ({
+    header: '💾',
+    title: `v${v.version}`.substring(0, 35),
+    description: v.modText.substring(0, 50),
+    id: 'hmoddl' + SEP + Buffer.from(v.href).toString('base64url')
+  }))
+
+  const interactiveMessage = proto.Message.InteractiveMessage.create({
+    header: { title: 'HAPPYMOD - VERSIONES', subtitle: name, hasMediaAttachment: false },
+    body: { text: `🩸 DENJI BOT 🩸\n\n😈 *${name}*\n💀 ${rows.length} versiones disponibles\n\n> Elige cuál descargar` },
+    footer: { text: '🩸 DENJI BOT 🩸 | happymod.to' },
+    nativeFlowMessage: {
+      buttons: [{
+        name: 'single_select',
+        buttonParamsJson: JSON.stringify({
+          title: '💾 VERSIONES MOD',
+          sections: [{ title: 'ELIGE UNA', rows }]
+        })
+      }]
+    }
+  })
+
+  const msg = generateWAMessageFromContent(m.chat, {
+    viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } }
+  }, { quoted: m })
+
+  await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
+  await m.react('🩸')
 }
 
-// ─── Handler.before — respuesta a botones ────────────────────────────────────
+// ─── Handler.before ───────────────────────────────────────────────────────────
 
 handler.before = async (m, { conn }) => {
   const nativeFlow = m.message?.interactiveResponseMessage?.nativeFlowResponseMessage
@@ -295,23 +303,21 @@ handler.before = async (m, { conn }) => {
     const id = data.id || data.selectedId || data.selectedRowId || null
     if (!id) return false
 
-    // Paso 1: eligió un juego → mostrar versiones
+    // Eligió un juego → mostrar versiones
     if (id.startsWith('hmod' + SEP) && !id.startsWith('hmoddl' + SEP)) {
       const payload = id.slice(('hmod' + SEP).length)
       const parts = payload.split(SEP)
-      const appLink = Buffer.from(parts[0], 'base64url').toString()
-      const appName = Buffer.from(parts[1], 'base64url').toString()
-
+      const path = Buffer.from(parts[0], 'base64url').toString()
+      const name = Buffer.from(parts[1], 'base64url').toString()
       await m.react('⏳')
       await conn.sendMessage(m.chat, {
-        text: `🩸 DENJI BOT 🩸\n\n😈 Obteniendo info de *${appName}*...`
+        text: `🩸 DENJI BOT 🩸\n\n😈 Obteniendo info de *${name}*...`
       }, { quoted: m })
-
-      await mostrarDetalle(conn, m, appLink, appName)
+      await mostrarVersiones(conn, m, path, name)
       return true
     }
 
-    // Paso 2: eligió una versión → obtener link directo y enviar
+    // Eligió una versión → descargar
     if (id.startsWith('hmoddl' + SEP)) {
       const payload = id.slice(('hmoddl' + SEP).length)
       const downloadingUrl = Buffer.from(payload, 'base64url').toString()
@@ -321,24 +327,19 @@ handler.before = async (m, { conn }) => {
         text: '🩸 DENJI BOT 🩸\n\n⚰️ Obteniendo link de descarga...'
       }, { quoted: m })
 
-      // Intentar obtener mirror de happymod.net
       let directUrl = ''
-      try {
-        directUrl = await getDirectDownload(downloadingUrl)
-      } catch {}
+      try { directUrl = await getMirrorLink(downloadingUrl) } catch {}
 
       if (!directUrl) {
-        // Fallback: mandar el link de la página de descarga
         await conn.sendMessage(m.chat, {
-          text: `🩸 DENJI BOT 🩸\n\n⚠️ No se pudo obtener el link directo automáticamente.\n\n📥 *Descarga desde aquí:*\n${downloadingUrl}\n\n> Abre el link, toca "Download" y el APK se descarga`
+          text: `🩸 DENJI BOT 🩸\n\n⚠️ No se pudo obtener el APK directo.\n\n📥 *Descarga desde aquí:*\n${downloadingUrl}\n\n> Abre el link y toca "Download"`
         }, { quoted: m })
         await m.react('⚠️')
         return true
       }
 
-      // Tenemos mirror de happymod.net — enviar como documento
       await conn.sendMessage(m.chat, {
-        text: `🩸 DENJI BOT 🩸\n\n😈 Enviando MOD APK...\n> Esto puede tardar según el tamaño`
+        text: '🩸 DENJI BOT 🩸\n\n😈 Enviando MOD APK...'
       }, { quoted: m })
 
       try {
@@ -346,13 +347,12 @@ handler.before = async (m, { conn }) => {
           document: { url: directUrl },
           mimetype: 'application/vnd.android.package-archive',
           fileName: 'HappyMod_mod.apk',
-          caption: `🩸 DENJI BOT 🩸\n\n😈 *MOD APK de HappyMod*\n\n> ⚠️ Desactiva Google Play Protect antes de instalar`
+          caption: `🩸 DENJI BOT 🩸\n\n😈 *MOD APK — HappyMod*\n\n> ⚠️ Desactiva Google Play Protect antes de instalar`
         }, { quoted: m })
         await m.react('🩸')
-      } catch (sendErr) {
-        // Si falla el envío directo, mandar el link
+      } catch (e) {
         await conn.sendMessage(m.chat, {
-          text: `🩸 DENJI BOT 🩸\n\n⚠️ No pude enviar el APK directamente: ${sendErr.message}\n\n📥 *Descárgalo desde:*\n${directUrl}`
+          text: `🩸 DENJI BOT 🩸\n\n⚠️ Fallo el envío: ${e.message}\n\n📥 Descárgalo manualmente:\n${directUrl}`
         }, { quoted: m })
         await m.react('⚠️')
       }
