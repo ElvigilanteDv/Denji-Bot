@@ -21,8 +21,12 @@ const tagLabels = {
   serbot:     '🤖 Serbot',
   owner:      '⚙️ Owner',
   downloader: '📥 Descargas',
+  converter:  '🔧 Conversores',
   info:       '📟 Info'
 }
+
+// Cualquier tag que NO esté arriba cae aquí, así nunca se "pierde" un comando
+const FALLBACK_LABEL = '🧩 Otros'
 
 const defaultMenu = {
   before: `
@@ -31,15 +35,14 @@ const defaultMenu = {
 ··──→ 𝙐𝙨𝙚𝙧  : %name
 ··──→ 𝙉𝙞𝙫𝙚𝙡 : %level
 ··──→ 𝙀𝙭𝙥   : %exp / %maxexp
+··──→ 𝙏𝙤𝙩𝙖𝙡 : %totalcmd comandos
 ··──→ 𝙈𝙤𝙙𝙤  : %mode
-··──→ 𝙐𝙥    : %uptime
-··──→ 𝙐𝙨𝙧𝙨  : %totalreg
-··──→ 𝙏𝙞𝙢𝙚  : %time
+··──→ 𝙐𝙨𝙚𝙧𝙨 : %totalreg
+··──→ 𝙏𝙞𝙚𝙢𝙥𝙤: %uptime
 ✦─────────────────✦
 %readmore`.trim(),
-  header: '\n\\ꔫ꒾/%category〔%count〕\\ꔫ꒾/\n⸻⸻⸻⸻⸻⸻',
-  body:   '\n❧ %cmd\n  ↳ %desc',
-  footer: '⸻⸻⸻⸻⸻⸻',
+  header: '\n✦ %category 〔%count〕\n⸻⸻⸻⸻⸻⸻',
+  footer: '',
   after:  '\n✦─────────────────✦\n꒰ঌ ᴄʀᴇᴀᴅᴏ ᴘᴏʀ ᴊᴍ ✦ ᴅᴇɴᴊɪ ʙᴏᴛ ໒꒱\n✦─────────────────✦'
 }
 
@@ -74,6 +77,12 @@ const clockString = ms =>
     .map((v, i) => String(Math.floor(ms / v) % (i ? 60 : 99)).padStart(2, '0'))
     .join(':')
 
+// Una sola línea por comando, limpia y consistente
+const buildCommandLine = (p, h, prefix) => {
+  const cmd = p.prefix ? h : prefix + h
+  return p.desc ? `❧ ${cmd}\n   ↳ ${p.desc}` : `❧ ${cmd}`
+}
+
 let handler = async (m, { conn, usedPrefix: _p, command }) => {
   try {
     await conn.sendMessage(m.chat, { react: { text: '🩸', key: m.key } })
@@ -87,27 +96,27 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
     const menuMedia = loadMenuMedia(botJid)
     const menu = global.subBotMenus?.[botJid] || defaultMenu
 
-    const replace = {
-      name:     await conn.getName(m.sender),
-      level:    user.level,
-      exp:      Math.max(0, user.exp - min),
-      maxexp:   xp,
-      totalreg: Object.keys(users).length,
-      totalcmd: Object.keys(global.plugins ?? {}).length,
-      mode:     global.opts?.self ? 'Privado' : 'Público',
-      uptime:   clockString(process.uptime() * 1000),
-      time:     new Date().toLocaleString('es-MX', { hour12: true }),
-      readmore: readMore
-    }
-
     const pluginList = Object.values(global.plugins ?? {})
-      .filter(p => !p.disabled)
+      .filter(p => !p.disabled && [].concat(p.help ?? []).length)
       .map(p => ({
         help:   [].concat(p.help ?? []),
         tags:   [].concat(p.tags ?? []),
         prefix: 'customPrefix' in p,
         desc:   p.desc || ''
       }))
+
+    const replace = {
+      name:     await conn.getName(m.sender),
+      level:    user.level,
+      exp:      Math.max(0, user.exp - min),
+      maxexp:   xp,
+      totalreg: Object.keys(users).length,
+      totalcmd: pluginList.reduce((acc, p) => acc + p.help.length, 0),
+      mode:     global.opts?.self ? 'Privado' : 'Público',
+      uptime:   clockString(process.uptime() * 1000),
+      time:     new Date().toLocaleString('es-MX', { hour12: true }),
+      readmore: readMore
+    }
 
     let tagFiltro = null
     const match = command.match(/^(?:menu|menú|help)(.+)$/i)
@@ -116,27 +125,29 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
       tagFiltro = Object.keys(tagLabels).find(k => k === buscada) ?? null
     }
 
+    const buildSection = (label, matched) => {
+      if (!matched.length) return ''
+      const cmds = matched
+        .flatMap(p => p.help.map(h => buildCommandLine(p, h, _p)))
+        .sort((a, b) => a.localeCompare(b))
+        .join('\n')
+      const header = menu.header
+        .replace('%category', textCyberpunk(label))
+        .replace('%count', matched.length)
+      return `${header}\n${cmds}`
+    }
+
     const secciones = Object.entries(tagLabels)
       .filter(([tag]) => !tagFiltro || tag === tagFiltro)
-      .map(([tag, label]) => {
-        const cmds = pluginList
-          .filter(p => p.tags.includes(tag))
-          .flatMap(p =>
-            p.help.map(h => {
-              const cmd = p.prefix ? h : _p + h
-              const desc = p.desc ? `  ↳ ${p.desc}` : ''
-              return `❧ ${cmd}${desc ? '\n' + desc : ''}`
-            })
-          ).join('\n')
-
-        if (!cmds) return ''
-        const count = pluginList.filter(p => p.tags.includes(tag)).length
-        const header = menu.header
-          .replace('%category', textCyberpunk(label))
-          .replace('%count', count)
-        return `${header}\n${cmds}\n${menu.footer}`
-      })
+      .map(([tag, label]) => buildSection(label, pluginList.filter(p => p.tags.includes(tag))))
       .filter(Boolean)
+
+    // Comandos cuyo tag no coincide con nada de tagLabels — antes desaparecían, ahora caen aquí
+    if (!tagFiltro) {
+      const huerfanos = pluginList.filter(p => !p.tags.some(t => tagLabels[t]))
+      const seccionHuerfanos = buildSection(FALLBACK_LABEL, huerfanos)
+      if (seccionHuerfanos) secciones.push(seccionHuerfanos)
+    }
 
     const texto = [menu.before, ...secciones, menu.after]
       .join('\n')
@@ -163,7 +174,7 @@ let handler = async (m, { conn, usedPrefix: _p, command }) => {
 
 handler.help     = ['menu', 'menú', 'help']
 handler.tags     = ['main']
-handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|tools|info|main)?$/i
+handler.command  = /^(menu|menú|help)(rpg|group|game|gacha|diversion|anime|serbot|owner|downloader|converter|info|main)?$/i
 handler.register = false
 handler.desc     = 'Muestra el menú principal de Denji Bot'
 
