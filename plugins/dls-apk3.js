@@ -25,8 +25,6 @@ async function getHtml(url) {
   if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`)
   return res.text()
 }
-──
-
 // ─── Búsqueda Adaptada para happymod.to ────────────────────────────────────
 
 async function searchHappymod(query) {
