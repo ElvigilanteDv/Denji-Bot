@@ -1,5 +1,5 @@
 // © 2026 EL VIGILANTE & BRAYANRK - DENJI BOT
-// HappyMod scraper - busca via Google, scrapea download.happymod.to con cheerio
+// HappyMod scraper
 import fetch from 'node-fetch'
 import * as cheerio from 'cheerio'
 import {
@@ -11,7 +11,6 @@ const SEP = '|~|'
 const BASE_DL = 'https://download.happymod.to'
 const UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'
 
-// ─── Fetch helper ─────────────────────────────────────────────────────────────
 
 async function getHtml(url) {
   const res = await fetch(url, {
@@ -27,39 +26,41 @@ async function getHtml(url) {
   return res.text()
 }
 
-// ─── Búsqueda via DuckDuckGo HTML (sin API, sin bloqueos) ────────────────────
-
 async function searchHappymod(query) {
-  // DuckDuckGo lite devuelve HTML estático, sin JS
-  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent('site:download.happymod.to ' + query + ' mod apk')}`
+
+  const searchUrl = `https://happymod.to{encodeURIComponent(query)}`
   const html = await getHtml(searchUrl)
   const $ = cheerio.load(html)
   const results = []
 
-  $('.result__title a, .result a.result__url').each((_, el) => {
-    const href = $(el).attr('href') || ''
+
+  $('.container .row .col-md-3, .container .row a').each((_, el) => {
+    const href = $(el).attr('href') || $(el).find('a').attr('href') || ''
     const text = $(el).text().trim()
-    // Filtrar solo URLs de download.happymod.to con estructura de app
-    const match = href.match(/download\.happymod\.to(\/[^/]+-mod\/[^/]+\/?)/)
+    
+
+    const match = href.match(/(\/[^/]+-mod\/[^/]+\/?)/)
+    
     if (match && results.length < 8) {
       const path = match[1].replace(/\/$/, '')
-      // Nombre limpio del título
-      const name = text.replace(/mod apk.*/i, '').replace(/download.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
-      // Evitar duplicados por path
+
+      const name = text.split('\n')[0].replace(/mod apk.*/i, '').replace(/download.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
+      
+
       if (!results.find(r => r.path === path)) {
         results.push({ name, path })
       }
     }
   })
 
-  // Fallback: extraer de los snippets también
-  if (results.length < 3) {
-    $('a[href*="download.happymod.to"]').each((_, el) => {
+
+  if (results.length === 0) {
+    $('a[href*="-mod/"]').each((_, el) => {
       const href = $(el).attr('href') || ''
-      const match = href.match(/download\.happymod\.to(\/[^/]+-mod\/[^/]+\/?)/)
+      const match = href.match(/(\/[^/]+-mod\/[^/]+\/?)/)
       if (match && results.length < 8) {
         const path = match[1].replace(/\/$/, '')
-        const name = $(el).text().replace(/mod apk.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
+        const name = $(el).text().split('\n')[0].replace(/mod apk.*/i, '').trim() || path.split('/')[1]?.replace(/-/g, ' ') || 'Unknown'
         if (!results.find(r => r.path === path)) {
           results.push({ name, path })
         }
@@ -70,86 +71,10 @@ async function searchHappymod(query) {
   return results
 }
 
-// ─── Scraper de detalle de app (download.happymod.to) ────────────────────────
-
-async function getAppDetail(path) {
-  const url = `${BASE_DL}${path}/`
-  const html = await getHtml(url)
-  const $ = cheerio.load(html)
-
-  const name = $('h1').first().text().replace(/v[\d.]+\s*mod apk.*/i, '').replace(/mod apk.*/i, '').trim()
-  const icon = $('img').first().attr('src') || ''
-
-  // Tabla de info
-  const tableData = {}
-  $('table tr').each((_, row) => {
-    const cells = $(row).find('td')
-    if (cells.length >= 2) {
-      const key = $(cells[0]).text().trim().toLowerCase()
-      const val = $(cells[1]).text().trim()
-      tableData[key] = val
-    }
-  })
-
-  const version = tableData['version'] || ''
-  const modFeatures = tableData['mod feaures'] || tableData['mod features'] || tableData['mod'] || ''
-  const category = tableData['category'] || ''
-  const rating = tableData['rating'] || ''
-  const requires = tableData['requires'] || ''
-  const size = $('a[href*="download.html"]').first().text().match(/[\d.]+ MB/i)?.[0] || ''
-
-  return { name, icon, version, modFeatures, category, rating, requires, size, path }
-}
-
-// ─── Scraper de versiones (download.html) ────────────────────────────────────
-
-async function getVersions(path) {
-  const url = `${BASE_DL}${path}/download.html`
-  const html = await getHtml(url)
-  const $ = cheerio.load(html)
-  const versions = []
-
-  $('a[href*="downloading.html"]').each((_, el) => {
-    const href = $(el).attr('href') || ''
-    const fullText = $(el).text().replace(/\s+/g, ' ').trim()
-
-    // Extraer versión del href
-    const vFromHref = href.match(/\/([^/]+)\/downloading\.html$/)
-    let version = vFromHref?.[1] || ''
-    if (version === 'downloading') version = '' // href raíz = versión más reciente
-
-    // Extraer mods del texto (lo que viene después de la versión)
-    const modText = fullText
-      .replace(/.*?v?[\d]+\.[\d.]+/i, '')
-      .replace(/^[\s-]+/, '')
-      .replace(/mod\s*/i, '')
-      .trim()
-      .substring(0, 50) || 'Mod APK'
-
-    // Extraer versión del texto si no la tenemos
-    if (!version) {
-      const vFromText = fullText.match(/v?([\d]+\.[\d.]+)/)
-      version = vFromText?.[1] || 'latest'
-    }
-
-    const hrefB64 = Buffer.from(href).toString('base64url')
-    const label = `v${version}${modText ? ' — ' + modText : ''}`.substring(0, 60)
-
-    if (!versions.find(v => v.href === href) && versions.length < 8) {
-      versions.push({ version, modText, href, label })
-    }
-  })
-
-  return versions
-}
-
-// ─── Obtener mirror de happymod.net desde la página downloading ───────────────
-
 async function getMirrorLink(downloadingUrl) {
   const html = await getHtml(downloadingUrl)
   const $ = cheerio.load(html)
 
-  // Buscar link mirror en happymod.net
   const mirror = $('a[href*="happymod.net"]').filter((_, el) => {
     const href = $(el).attr('href') || ''
     return href.includes('download')
@@ -157,12 +82,10 @@ async function getMirrorLink(downloadingUrl) {
 
   if (mirror) return mirror
 
-  // Buscar en el HTML crudo
   const match = html.match(/https?:\/\/happymod\.net\/[^"'\s]+download[^"'\s]*/i)
   return match?.[0] || ''
 }
 
-// ─── Handler principal ────────────────────────────────────────────────────────
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
   const query = text?.trim()
@@ -191,7 +114,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       return await mostrarVersiones(conn, m, results[0].path, results[0].name)
     }
 
-    // Botones con resultados
+
     const rows = results.map(app => {
       const pathB64 = Buffer.from(app.path).toString('base64url')
       const nameB64 = Buffer.from(app.name).toString('base64url')
@@ -233,7 +156,6 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   }
 }
 
-// ─── Mostrar detalle + versiones ──────────────────────────────────────────────
 
 async function mostrarVersiones(conn, m, path, appName) {
   const detail = await getAppDetail(path)
@@ -292,7 +214,6 @@ async function mostrarVersiones(conn, m, path, appName) {
   await m.react('🩸')
 }
 
-// ─── Handler.before ───────────────────────────────────────────────────────────
 
 handler.before = async (m, { conn }) => {
   const nativeFlow = m.message?.interactiveResponseMessage?.nativeFlowResponseMessage
@@ -303,7 +224,6 @@ handler.before = async (m, { conn }) => {
     const id = data.id || data.selectedId || data.selectedRowId || null
     if (!id) return false
 
-    // Eligió un juego → mostrar versiones
     if (id.startsWith('hmod' + SEP) && !id.startsWith('hmoddl' + SEP)) {
       const payload = id.slice(('hmod' + SEP).length)
       const parts = payload.split(SEP)
@@ -317,7 +237,6 @@ handler.before = async (m, { conn }) => {
       return true
     }
 
-    // Eligió una versión → descargar
     if (id.startsWith('hmoddl' + SEP)) {
       const payload = id.slice(('hmoddl' + SEP).length)
       const downloadingUrl = Buffer.from(payload, 'base64url').toString()
