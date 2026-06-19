@@ -98,7 +98,7 @@ let handler = async (m, { conn, usedPrefix }) => {
     ``,
     `ℹ️ *INFO*`,
     `🪚 *Bot:*      Denji Bot`,
-    `👑 *Creador:*  JM`,
+    `👑 *Creador:*  © JM`,
     `📦 *Versión:*  ${global.vs || '1.0.0'}`,
     `🔗 *Base:*     Baileys ${global.baileys || ''}`,
     ``,
