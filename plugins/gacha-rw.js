@@ -1,16 +1,8 @@
-import fetch from 'node-fetch'
+import fs from 'fs'
+import path from 'path'
 
-const API_BASE = 'https://elvigilante-api.onrender.com/api'
-const API_KEY = 'elvigilante'
-
+const GACHA_FILE = path.join(process.cwd(), 'gacha.json')
 const cooldowns = new Map()
-
-async function pullGacha() {
-  const res = await fetch(`${API_BASE}/tools/gacha/pull?apiKey=${API_KEY}`)
-  const json = await res.json()
-  if (!json.status || !json.data?.pull) throw new Error('La motosierra falló')
-  return json.data.pull
-}
 
 let handler = async (m, { conn }) => {
   const now = Date.now()
@@ -25,26 +17,37 @@ let handler = async (m, { conn }) => {
     }, { quoted: m })
   }
 
-  try {
-    const pull = await pullGacha()
-    
-    if (!global.lastRoll) global.lastRoll = new Map()
-    global.lastRoll.set(m.sender, pull)
-    cooldowns.set(m.sender, now + 300000)
-
-    const rarityEmojis = { 'SSR': '🌟', 'SR': '⭐', 'R': '✨', 'N': '💀' }
-    const emoji = rarityEmojis[pull.rarity] || '🔩'
-
-    await conn.sendMessage(m.chat, {
-      image: { url: pull.image },
-      caption: `⛓️ DENJI BOT ⛓️\n\n🪚 ¡Denji cortó un demonio!\n\n${emoji} ${pull.name}\n🔩 Rareza: ${pull.rarity}\n🩸 ATK: ${pull.attack} | 🛡️ DEF: ${pull.defense} | 💀 HP: ${pull.health}\n\n> Usa #claim para guardarlo\n> ⏳ 5 minutos`
-    }, { quoted: m })
-
-  } catch (e) {
-    conn.sendMessage(m.chat, {
-      text: `⛓️ DENJI BOT ⛓️\n\n💀 La motosierra falló\n🩸 No se pudo obtener personaje`
+  if (!fs.existsSync(GACHA_FILE)) {
+    return conn.sendMessage(m.chat, {
+      text: `⛓️ DENJI BOT ⛓️\n\n💀 No hay gacha.json\n🔩 Agrega el archivo de personajes`
     }, { quoted: m })
   }
+
+  let characters = JSON.parse(fs.readFileSync(GACHA_FILE, 'utf8'))
+
+  let random = Math.random()
+  let rarity
+  if (random < 0.02) rarity = 'SSR'
+  else if (random < 0.15) rarity = 'SR'
+  else if (random < 0.40) rarity = 'R'
+  else rarity = 'N'
+
+  let pool = characters.filter(c => c.rarity === rarity)
+  if (pool.length === 0) pool = characters
+
+  let char = pool[Math.floor(Math.random() * pool.length)]
+
+  if (!global.lastRoll) global.lastRoll = new Map()
+  global.lastRoll.set(m.sender, char)
+  cooldowns.set(m.sender, now + 300000)
+
+  const rarityEmojis = { 'SSR': '🌟', 'SR': '⭐', 'R': '✨', 'N': '💀' }
+  const emoji = rarityEmojis[char.rarity] || '🔩'
+
+  await conn.sendMessage(m.chat, {
+    image: { url: char.image },
+    caption: `⛓️ DENJI BOT ⛓️\n\n🪚 ¡Denji cortó un demonio!\n\n${emoji} ${char.name}\n🔩 Rareza: ${char.rarity}\n🩸 ATK: ${char.attack} | 🛡️ DEF: ${char.defense} | 💀 HP: ${char.health}\n\n> Usa #claim para guardarlo\n> ⏳ 5 minutos`
+  }, { quoted: m })
 }
 
 handler.help = ['rw']
