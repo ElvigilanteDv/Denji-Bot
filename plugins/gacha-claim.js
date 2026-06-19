@@ -1,7 +1,6 @@
-const lastRoll = new Map()
-
 let handler = async (m, { conn }) => {
-  const pull = lastRoll.get(m.sender)
+  if (!global.lastRoll) global.lastRoll = new Map()
+  const pull = global.lastRoll.get(m.sender)
 
   if (!pull) {
     return conn.sendMessage(m.chat, {
@@ -32,7 +31,7 @@ let handler = async (m, { conn }) => {
 
   const total = user.diamantes !== undefined ? user.diamantes : (user.diamond || 0)
 
-  lastRoll.delete(m.sender)
+  global.lastRoll.delete(m.sender)
 
   await conn.sendMessage(m.chat, {
     image: { url: pull.image },
