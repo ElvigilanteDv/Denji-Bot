@@ -4,7 +4,6 @@ const API_BASE = 'https://elvigilante-api.onrender.com/api'
 const API_KEY = 'elvigilante'
 
 const cooldowns = new Map()
-const lastRoll = new Map()
 
 async function pullGacha() {
   const res = await fetch(`${API_BASE}/tools/gacha/pull?apiKey=${API_KEY}`)
@@ -28,7 +27,9 @@ let handler = async (m, { conn }) => {
 
   try {
     const pull = await pullGacha()
-    lastRoll.set(m.sender, pull)
+    
+    if (!global.lastRoll) global.lastRoll = new Map()
+    global.lastRoll.set(m.sender, pull)
     cooldowns.set(m.sender, now + 300000)
 
     const rarityEmojis = { 'SSR': '🌟', 'SR': '⭐', 'R': '✨', 'N': '💀' }
@@ -36,7 +37,7 @@ let handler = async (m, { conn }) => {
 
     await conn.sendMessage(m.chat, {
       image: { url: pull.image },
-      caption: `⛓️ DENJI BOT ⛓️\n\n🪚 ¡Denji cortó un demonio!\n\n${emoji} ${pull.name}\n🔩 Rareza: ${pull.rarity}\n🩸 ATK: ${pull.attack} | 🛡️ DEF: ${pull.defense} | 💀 HP: ${pull.health}\n\n> Usa .claim para guardarlo\n> ⏳ 5 minutos`
+      caption: `⛓️ DENJI BOT ⛓️\n\n🪚 ¡Denji cortó un demonio!\n\n${emoji} ${pull.name}\n🔩 Rareza: ${pull.rarity}\n🩸 ATK: ${pull.attack} | 🛡️ DEF: ${pull.defense} | 💀 HP: ${pull.health}\n\n> Usa #claim para guardarlo\n> ⏳ 5 minutos`
     }, { quoted: m })
 
   } catch (e) {
