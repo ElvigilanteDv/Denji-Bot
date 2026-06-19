@@ -66,7 +66,7 @@ const handler = async (m, { conn, usedPrefix, command }) => {
 
 handler.help = ['tts <texto>']
 handler.tags = ['tools']
-handler.command = /^(tts|voz|speak)$/i
+handler.command = /^(tts|voz|hablar)$/i
 handler.desc = 'Convierte texto a voz tenebrosa'
 
 export default handler
