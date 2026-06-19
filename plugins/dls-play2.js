@@ -105,42 +105,44 @@ async function normalizeForWhatsApp(inputPath, outputPath) {
 async function sendVideo(conn, m, videoUrl, title) {
   const res = await fetch(`${VIGILANTE_API}/download/ytvideo?url=${encodeURIComponent(videoUrl)}&quality=${VIDEO_QUALITY}&apiKey=${VIGILANTE_KEY}`)
   const json = await res.json()
-  if (!json.status || !json.result?.download_url) throw new Error('No se pudo obtener el video')
+  if (!json.status || !json.result?.download_url) throw new Error('⛓️ La motosierra no pudo cortar el video')
 
   const downloadUrl = json.result.download_url
   const finalTitle = safeFileName(json.result.title || title)
-  const rawFile = path.join(TEMP_DIR, `yt_${Date.now()}.mp4`)
-  const finalFile = path.join(TEMP_DIR, `yt_final_${Date.now()}.mp4`)
 
   try {
-    const videoInfo = await downloadVideo(downloadUrl, rawFile)
-    const finalName = normalizeMp4Name(videoInfo.fileName || finalTitle)
-
-    if (videoInfo.size > VIDEO_AS_DOCUMENT_THRESHOLD) {
-      await conn.sendMessage(m.chat, {
-        document: fs.readFileSync(rawFile), mimetype: 'video/mp4',
-        fileName: finalName, caption: `🎬 ${finalTitle}`
-      }, { quoted: m })
-    } else {
-      try {
+    await conn.sendMessage(m.chat, {
+      video: { url: downloadUrl },
+      mimetype: 'video/mp4',
+      fileName: `${finalTitle}.mp4`,
+      caption: `⛓️ DENJI BOT ⛓️\n\n🔩 ¡Video cortado!\n🩸 ${finalTitle}\n💀 Calidad: ${json.result.quality || VIDEO_QUALITY}`
+    }, { quoted: m })
+    return finalTitle
+  } catch {
+    const rawFile = path.join(TEMP_DIR, `yt_${Date.now()}.mp4`)
+    const finalFile = path.join(TEMP_DIR, `yt_final_${Date.now()}.mp4`)
+    try {
+      const videoInfo = await downloadVideo(downloadUrl, rawFile)
+      const finalName = normalizeMp4Name(videoInfo.fileName || finalTitle)
+      if (videoInfo.size > VIDEO_AS_DOCUMENT_THRESHOLD) {
         await conn.sendMessage(m.chat, {
-          video: fs.readFileSync(rawFile), mimetype: 'video/mp4',
-          fileName: finalName, caption: `🎬 ${finalTitle}`
+          document: fs.readFileSync(rawFile), mimetype: 'video/mp4',
+          fileName: finalName, caption: `⛓️ DENJI BOT ⛓️\n\n💀 Video muy grande\n🩸 ${finalTitle}`
         }, { quoted: m })
-      } catch {
+      } else {
         await normalizeForWhatsApp(rawFile, finalFile)
         const filePath = fs.existsSync(finalFile) ? finalFile : rawFile
         await conn.sendMessage(m.chat, {
           video: fs.readFileSync(filePath), mimetype: 'video/mp4',
-          fileName: finalName, caption: `🎬 ${finalTitle}`
+          fileName: finalName, caption: `⛓️ DENJI BOT ⛓️\n\n🔩 ¡Video cortado!\n🩸 ${finalTitle}`
         }, { quoted: m })
       }
+    } finally {
+      deleteFileSafe(rawFile)
+      deleteFileSafe(finalFile)
     }
-  } finally {
-    deleteFileSafe(rawFile)
-    deleteFileSafe(finalFile)
+    return finalTitle
   }
-  return finalTitle
 }
 
 let handler = async (m, { conn, text, usedPrefix, command }) => {
@@ -156,26 +158,26 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 
   if (!input) {
     let media = null
-    try { media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/r60c8l.jpg' } }, { upload: conn.waUploadToServer }) } catch {}
+    try { media = await prepareWAMessageMedia({ image: { url: 'https://files.catbox.moe/ks2023.jpg' } }, { upload: conn.waUploadToServer }) } catch {}
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: '𑁍ࠬܓ HINATA BOT 𑁍ࠬܓ', subtitle: 'Descarga videos de YouTube', hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
-      body: { text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Descarga videos de YouTube\n\n> ${usedPrefix}${command} <nombre o link>\n> Ejemplo: ${usedPrefix}${command} Naruto Opening 1\n> 💎 Cuesta 1 diamante por descarga` },
-      footer: { text: '⫏⫏ HINATA BOT ✿' },
-      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎬 YOUTUBE', sections: [{ title: '¿Qué deseas hacer?', rows: [{ header: '🔍 BUSCAR', title: 'Buscar video', description: 'Escribe el nombre después del comando', id: 'ytinfo' }] }] }) }] }
+      header: { title: '⛓️ DENJI BOT ⛓️', subtitle: '¡Rev la motosierra! Videos de YouTube 🩸', hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+      body: { text: `⛓️ DENJI BOT ⛓️\n\n🔩 ¡Descarga videos con Denji!\n\n> ${usedPrefix}${command} <nombre o link>\n> Ejemplo: ${usedPrefix}${command} Chainsaw Man OP\n> 🩸 Cuesta 1 diamante` },
+      footer: { text: '🪚 DENJI BOT — ¡MOTOSIERRA ENCENDIDA! 🩸' },
+      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎬 YOUTUBE', sections: [{ title: '¿Qué cortamos hoy?', rows: [{ header: '🔍 BUSCAR', title: 'Buscar video', description: 'Escribe el nombre después del comando', id: 'ytinfo' }] }] }) }] }
     })
     const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
     return conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
   }
 
   if (isHttpUrl(input) && !extractYouTubeUrl(input)) {
-    return conn.sendMessage(m.chat, { text: '𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ Envía un link válido de YouTube' }, { quoted: m })
+    return conn.sendMessage(m.chat, { text: '⛓️ DENJI BOT ⛓️\n\n💀 Ese link no es de YouTube' }, { quoted: m })
   }
 
   const diamantes = getDiamantes(user)
   if (diamantes < 1) {
     return conn.sendMessage(m.chat, {
-      text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ No tienes suficientes diamantes\n\n❀ Necesitas: 1 💎\n❀ Tienes: ${diamantes} 💎\n\n> Usa #work para ganar`
+      text: `⛓️ DENJI BOT ⛓️\n\n💀 ¡Sin diamantes la motosierra no arranca!\n🩸 Necesitas: 1 | Tienes: ${diamantes}\n\n> Usa #work para conseguir`
     }, { quoted: m })
   }
 
@@ -189,7 +191,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   try {
     const res = await fetch(`${VIGILANTE_API}/search/youtube?apiKey=${VIGILANTE_KEY}&query=${encodeURIComponent(input)}`)
     const data = await res.json()
-    if (!data.status || !data.data?.length) throw new Error('No se encontraron resultados')
+    if (!data.status || !data.data?.length) throw new Error('Denji no encontró nada...')
 
     const resultados = data.data.slice(0, 10)
     let media = null
@@ -205,17 +207,17 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     }))
 
     const interactiveMessage = proto.Message.InteractiveMessage.create({
-      header: { title: '𑁍ࠬܓ HINATA BOT 𑁍ࠬܓ', subtitle: `Resultados: ${input}`, hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
-      body: { text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Búsqueda: *${input}*\n❀ ${resultados.length} resultados encontrados\n\n> Elige el video a descargar\n> 💎 1 diamante` },
-      footer: { text: '⫏⫏ HINATA BOT ✿' },
-      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎬 RESULTADOS', sections: [{ title: `📋 ${input.toUpperCase().slice(0, 24)}`, rows }] }) }] }
+      header: { title: '⛓️ DENJI BOT ⛓️', subtitle: `🩸 Resultados: ${input}`, hasMediaAttachment: !!media, imageMessage: media?.imageMessage },
+      body: { text: `⛓️ DENJI BOT ⛓️\n\n🔩 ¡${resultados.length} videos encontrados!\n\n> Elige cuál cortar\n> 🩸 1 diamante` },
+      footer: { text: '🪚 DENJI BOT — ¡MOTOSIERRA ENCENDIDA! 🩸' },
+      nativeFlowMessage: { buttons: [{ name: 'single_select', buttonParamsJson: JSON.stringify({ title: '🎬 RESULTADOS', sections: [{ title: `🩸 ${input.toUpperCase().slice(0, 24)}`, rows }] }) }] }
     })
     const msg = generateWAMessageFromContent(m.chat, { viewOnceMessage: { message: { messageContextInfo: {}, interactiveMessage } } }, { quoted: m })
     await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
     await m.react('✅')
   } catch (e) {
     await m.react('❌')
-    conn.sendMessage(m.chat, { text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ ${e.message}` }, { quoted: m })
+    conn.sendMessage(m.chat, { text: `⛓️ DENJI BOT ⛓️\n\n💀 ${e.message}` }, { quoted: m })
   }
 }
 
@@ -226,7 +228,7 @@ async function _descargarVideo(conn, m, videoUrl, title) {
   const diamantes = getDiamantes(user)
   if (diamantes < 1) {
     await conn.sendMessage(m.chat, {
-      text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ No tienes suficientes diamantes\n\n❀ Necesitas: 1 💎\n❀ Tienes: ${diamantes} 💎\n\n> Usa #work para ganar`
+      text: `⛓️ DENJI BOT ⛓️\n\n💀 ¡Sin diamantes la motosierra no arranca!\n🩸 Necesitas: 1 | Tienes: ${diamantes}\n\n> Usa #work para conseguir`
     }, { quoted: m })
     return
   }
@@ -236,23 +238,22 @@ async function _descargarVideo(conn, m, videoUrl, title) {
 
   await m.react('⏳')
   await conn.sendMessage(m.chat, {
-    text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Descargando video...\n❀ ${title} (${VIDEO_QUALITY})\n❀ -1 💎\n\n> Espera un momento...`
+    text: `⛓️ DENJI BOT ⛓️\n\n🪚 *¡Rev la motosierra!*\n📹 Cortando: ${title} (${VIDEO_QUALITY})\n🩸 -1 diamante\n💀 Destrozando el servidor...`
   }, { quoted: m })
 
   try {
     const finalTitle = await sendVideo(conn, m, videoUrl, title)
     await conn.sendMessage(m.chat, {
-      text: `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n✅ Descarga completada\n\n❀ ${finalTitle || title}\n❀ Diamantes restantes: ${restantes} 💎`
+      text: `⛓️ DENJI BOT ⛓️\n\n🔩 *¡Video cortado con éxito!*\n🩸 ${finalTitle || title}\n💀 Diamantes restantes: ${restantes}`
     }, { quoted: m })
-    await m.react('✅')
+    await m.react('🪚')
   } catch (e) {
     devolverDiamante(user, diamantes)
-    console.error('[YT ERROR]', e.message)
+    console.error('[DENJI YT ERROR]', e.message)
     await m.react('❌')
-    const rawMsg = String(e?.message || '').toLowerCase()
-    const humanMsg = (rawMsg.includes('502') || rawMsg.includes('503') || rawMsg.includes('bad gateway'))
-      ? '𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n⚠️ El servidor está saturado\n\n> Intenta más tarde\n> 💎 Diamante devuelto'
-      : `𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❌ ${e.message || 'Error al descargar'}\n\n> 💎 Diamante devuelto`
+    const humanMsg = (e.message?.includes('502') || e.message?.includes('503'))
+      ? '⛓️ DENJI BOT ⛓️\n\n💀 ¡El servidor está lleno de demonios!\n🩸 Intenta más tarde\n💀 Diamante devuelto'
+      : `⛓️ DENJI BOT ⛓️\n\n💀 ${e.message || 'Error al cortar el video'}\n🩸 Diamante devuelto`
     await conn.sendMessage(m.chat, { text: humanMsg }, { quoted: m })
   }
 }
@@ -278,7 +279,7 @@ handler.before = async (m, { conn }) => {
 
   if (id === 'ytinfo') {
     await conn.sendMessage(m.chat, {
-      text: '𑁍ࠬܓ ⁾ ㅤׄㅤׅㅤׄ HINATA BOT ㅤ֢ㅤׄㅤׅ\n\n❀ Escribe el nombre así:\n> .yt2 Naruto Opening 1'
+      text: '⛓️ DENJI BOT ⛓️\n\n🔩 Dile a Denji qué cortar:\n> .yt2 Chainsaw Man OP'
     }, { quoted: m })
     return true
   }
@@ -301,6 +302,6 @@ handler.before = async (m, { conn }) => {
 handler.help = ['yt2', 'video2']
 handler.tags = ['downloader']
 handler.command = /^(yt2|ytmp4v2|video2)$/i
-handler.desc = 'Descarga videos de YouTube con API propia 💎1'
+handler.desc = 'Denji corta videos de YouTube 🩸 1 diamante'
 
 export default handler
