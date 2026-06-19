@@ -1,122 +1,133 @@
 import os from 'os'
-import process from 'process'
-import speed from 'performance-now'
+import { execSync } from 'child_process'
 
-let handler = async (m, { conn, usedPrefix }) => {
-  const start = speed()
-
-  await m.react('🪚')
-
-  const msg = await conn.sendMessage(m.chat, {
-    text: '⏳ *Denji está revisando la máquina...*'
-  }, { quoted: m })
-
-  const ping = (speed() - start).toFixed(0)
-
-  const { emoji, estado, color } =
-    ping < 50  ? { emoji: '⚡', estado: 'Ultra Rápido', color: '🟢' } :
-    ping < 150 ? { emoji: '🪚', estado: 'Óptimo',       color: '🟢' } :
-    ping < 300 ? { emoji: '🔥', estado: 'Estable',      color: '🟡' } :
-    ping < 500 ? { emoji: '💨', estado: 'Lento',        color: '🟠' } :
-                 { emoji: '🐌', estado: 'Crítico',      color: '🔴' }
-
-  const uptime = process.uptime()
-  const dias   = Math.floor(uptime / 86400)
-  const horas  = Math.floor((uptime % 86400) / 3600)
-  const mins   = Math.floor((uptime % 3600) / 60)
-  const segs   = Math.floor(uptime % 60)
-  const uptimeStr = [
-    dias  && `${dias}d`,
-    horas && `${horas}h`,
-    mins  && `${mins}m`,
-    `${segs}s`
-  ].filter(Boolean).join(' ')
-
-  const totalRam   = os.totalmem()
-  const freeRam    = os.freemem()
-  const usedRam    = totalRam - freeRam
-  const totalMB    = (totalRam / 1024 / 1024).toFixed(0)
-  const usedMB     = (usedRam  / 1024 / 1024).toFixed(0)
-  const freeMB     = (freeRam  / 1024 / 1024).toFixed(0)
-  const ramPercent = ((usedRam / totalRam) * 100).toFixed(1)
-
-  const barraRAM = (() => {
-    const lleno = Math.round((usedRam / totalRam) * 10)
-    return '🩸'.repeat(lleno) + '⬛'.repeat(10 - lleno)
-  })()
-
-  const ramColor =
-    ramPercent < 50 ? '🟢' :
-    ramPercent < 75 ? '🟡' :
-    ramPercent < 90 ? '🟠' : '🔴'
-
-  const cpus      = os.cpus()
-  const cpuModel  = cpus[0]?.model?.trim() || 'Desconocido'
-  const cpuCores  = cpus.length
-  const platform  = `${os.platform()} ${os.arch()}`
-  const hostname  = os.hostname()
-
-  const totalPlugins = Object.keys(global.plugins || {}).length
-  const totalSubBots = (global.conns || []).filter(c => c?.user).length
-  const totalUsers   = Object.keys(global.db?.data?.users || {}).length
-  const totalChats   = Object.keys(global.db?.data?.chats || {}).length
-
-  const botName = conn.user?.name || global.namebot || 'Denji Bot'
-  const botNum  = conn.user?.jid?.split('@')[0] || '?'
-
-  const txt = [
-    `🪚「 DENJI BOT — STATUS 」🩸`,
-    ``,
-    `💀 *${botName}*`,
-    `📱 +${botNum}`,
-    `🟢 *Online y la motosierra encendida*`,
-    ``,
-    `🏓 *PING*`,
-    `${color} ${emoji} *${ping} ms* — ${estado}`,
-    ``,
-    `⏱️ *UPTIME*`,
-    `☠️ *Activo:* ${uptimeStr}`,
-    ``,
-    `💾 *RAM*`,
-    `${ramColor} ${barraRAM} ${ramPercent}%`,
-    `🩸 *Usado:*  ${usedMB} MB`,
-    `✅ *Libre:*  ${freeMB} MB`,
-    `📊 *Total:*  ${totalMB} MB`,
-    ``,
-    `🖥️ *SISTEMA*`,
-    `💻 *SO:*     ${platform}`,
-    `🏷️ *Host:*   ${hostname}`,
-    `⚙️ *CPU:*    ${cpuModel.slice(0, 25)}`,
-    `🔧 *Núcleos:* ${cpuCores}`,
-    ``,
-    `📊 *ESTADÍSTICAS DEL MATADERO*`,
-    `🪚 *Plugins:*  ${totalPlugins}`,
-    `🩸 *SubBots:*  ${totalSubBots}`,
-    `👥 *Usuarios:* ${totalUsers.toLocaleString()}`,
-    `💬 *Chats:*    ${totalChats.toLocaleString()}`,
-    `📌 *Prefijo:*  ${usedPrefix}`,
-    ``,
-    `ℹ️ *INFO*`,
-    `🪚 *Bot:*      Denji Bot`,
-    `👑 *Creador:*  © JM`,
-    `📦 *Versión:*  ${global.vs || '1.0.0'}`,
-    `🔗 *Base:*     Baileys ${global.baileys || ''}`,
-    ``,
-    `☠️ *La motosierra nunca se apaga*`,
-  ].join('\n')
-
-  try {
-    await conn.sendMessage(m.chat, { text: txt, edit: msg.key })
-  } catch {
-    await conn.sendMessage(m.chat, { text: txt }, { quoted: m })
-  }
-
-  await m.react('🪚')
+function runCmd(cmd) {
+  try { return execSync(cmd, { timeout: 3000 }).toString().trim() } catch { return null }
 }
 
-handler.help    = ['status']
-handler.tags    = ['info']
-handler.command = /^(status|estado|stats|sistema)$/i
-handler.desc    = '🪚 Estado del sistema con la motosierra de Denji'
+function getBattery() {
+  try {
+    const out = runCmd('termux-battery-status')
+    if (out) {
+      const json = JSON.parse(out)
+      const icon = json.status === 'CHARGING' ? '⚡' : json.percentage > 50 ? '🔋' : '🪫'
+      return `${icon} ${json.percentage}% — ${json.status === 'CHARGING' ? 'Cargando' : 'Descargando'}`
+    }
+  } catch {}
+  return '❓ Instala Termux:API'
+}
+
+function getRamReal() {
+  try {
+    const meminfo = runCmd('cat /proc/meminfo')
+    if (meminfo) {
+      const total = parseInt(meminfo.match(/MemTotal:\s+(\d+)/)?.[1] || 0)
+      const avail = parseInt(meminfo.match(/MemAvailable:\s+(\d+)/)?.[1] || 0)
+      const used = total - avail
+      const toMB = kb => (kb / 1024).toFixed(0)
+      return `${toMB(used)} MB / ${toMB(total)} MB (${((used/total)*100).toFixed(1)}%)`
+    }
+  } catch {}
+  return `${(process.memoryUsage().rss / 1024 / 1024).toFixed(0)} MB`
+}
+
+function getDisk() {
+  try {
+    const out = runCmd('df -h /data 2>/dev/null || df -h $HOME')
+    if (out) {
+      const line = out.split('\n').slice(-1)[0]
+      const p = line.trim().split(/\s+/)
+      return `${p[2]} usado / ${p[1]} total (${p[4]})`
+    }
+  } catch {}
+  return 'N/A'
+}
+
+function getCPU() {
+  try {
+    const out = runCmd("grep 'Processor\|processor\|CPU' /proc/cpuinfo | head -1")
+    if (out) return out.split(':')[1]?.trim()
+  } catch {}
+  return os.cpus()[0]?.model || 'ARM (Android)'
+}
+
+function getCPUCores() {
+  try {
+    const out = runCmd('nproc')
+    if (out) return out + ' núcleos'
+  } catch {}
+  return os.cpus().length + ' núcleos'
+}
+
+function getLoad() {
+  const load = os.loadavg()
+  return `${load[0].toFixed(2)} | ${load[1].toFixed(2)} | ${load[2].toFixed(2)}`
+}
+
+function getAndroid() {
+  try {
+    const ver = runCmd('getprop ro.build.version.release')
+    const sdk = runCmd('getprop ro.build.version.sdk')
+    const brand = runCmd('getprop ro.product.brand')
+    const model = runCmd('getprop ro.product.model')
+    if (ver) return `${brand || ''} ${model || ''} — Android ${ver} (SDK ${sdk || '?'})`
+  } catch {}
+  return os.platform()
+}
+
+let handler = async (m, { conn }) => {
+  let totalUsers = Object.keys(global.db.data.users).length
+  let totalGroups = Object.keys(global.db.data.chats).filter(id => id.endsWith('@g.us')).length
+  let totalCmds = Object.keys(global.plugins).length
+
+  let uptime = process.uptime()
+  let dias = Math.floor(uptime / 86400)
+  let horas = Math.floor((uptime % 86400) / 3600)
+  let minutos = Math.floor((uptime % 3600) / 60)
+  let segundos = Math.floor(uptime % 60)
+
+  const battery = getBattery()
+  const ram = getRamReal()
+  const disk = getDisk()
+  const cpu = getCPU()
+  const cores = getCPUCores()
+  const load = getLoad()
+  const android = getAndroid()
+  const node = process.version
+
+  const texto = [
+    '🩸 DENJI BOT 🩸',
+    '',
+    '💀 *ESTADÍSTICAS DEL BOT*',
+    '',
+    `👤 Usuarios: *${totalUsers}*`,
+    `👥 Grupos: *${totalGroups}*`,
+    `🔪 Comandos: *${totalCmds}*`,
+    `⏱️ Activo: *${dias}d ${horas}h ${minutos}m ${segundos}s*`,
+    '',
+    '🩸 *HARDWARE*',
+    '',
+    `🔋 Batería: *${battery}*`,
+    `💾 RAM: *${ram}*`,
+    `💿 Disco: *${disk}*`,
+    `🖥️ CPU: *${cpu}*`,
+    `⚙️ Núcleos: *${cores}*`,
+    `📊 Carga CPU: *${load}*`,
+    '',
+    '⚰️ *SOFTWARE*',
+    '',
+    `📱 Dispositivo: *${android}*`,
+    `📦 Node.js: *${node}*`,
+    '',
+    '🩸 DENJI BOT 🩸'
+  ].join('\n')
+
+  await conn.sendMessage(m.chat, { text: texto }, { quoted: m })
+}
+
+handler.help = ['botinfo']
+handler.tags = ['info']
+handler.command = /^(botinfo|stats|estado|info)$/i
+handler.desc = 'Estadísticas completas del bot'
 
 export default handler
