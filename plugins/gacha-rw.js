@@ -5,51 +5,50 @@ const API_KEY = 'elvigilante'
 
 const cooldowns = new Map()
 const lastRoll = new Map()
-const BORDER_TOP = '╭⊱ ━━━━━━━━━━━━━━━ ⊰╮'
-const BORDER_BOTTOM = '╰⊱ ━━━━━━━━━━━━━━━ ⊰╯'
 
 async function pullGacha() {
   const res = await fetch(`${API_BASE}/tools/gacha/pull?apiKey=${API_KEY}`)
   const json = await res.json()
-  if (!json.status || !json.data?.pull) throw new Error('No se pudo tirar la gacha')
+  if (!json.status || !json.data?.pull) throw new Error('La motosierra falló')
   return json.data.pull
 }
 
-module.exports = {
-  command: ['rw', 'roll', 'gacha'],
-  description: 'Tira de la gacha cada 5 minutos',
-  categoria: 'gacha',
+let handler = async (m, { conn }) => {
+  const now = Date.now()
+  const cd = cooldowns.get(m.sender) || 0
 
-  run: async (client, m, args, from) => {
-    const now = Date.now()
-    const cd = cooldowns.get(from) || 0
+  if (now < cd) {
+    const restante = Math.ceil((cd - now) / 1000)
+    const minutos = Math.floor(restante / 60)
+    const segundos = restante % 60
+    return conn.sendMessage(m.chat, {
+      text: `⛓️ DENJI BOT ⛓️\n\n💀 La motosierra se está enfriando\n🔩 Espera ${minutos}m ${segundos}s`
+    }, { quoted: m })
+  }
 
-    if (now < cd) {
-      const restante = Math.ceil((cd - now) / 1000)
-      const minutos = Math.floor(restante / 60)
-      const segundos = restante % 60
-      return client.sendMessage(from, {
-        text: `${BORDER_TOP}\n       ᴍᴀɴᴇᴋɪ-ɴᴇᴋᴏ ʙᴏᴛ\n${BORDER_BOTTOM}\n\n『 ɢᴀᴄʜᴀ 』\n\n⊹ Espera ${minutos}m ${segundos}s\n⊹ La gacha se está recargando\n\n${BORDER_TOP}\n       🐾 Gacha\n${BORDER_BOTTOM}`
-      }, { quoted: m })
-    }
+  try {
+    const pull = await pullGacha()
+    lastRoll.set(m.sender, pull)
+    cooldowns.set(m.sender, now + 300000)
 
-    try {
-      const pull = await pullGacha()
-      lastRoll.set(from, pull)
-      cooldowns.set(from, now + 300000)
+    const rarityEmojis = { 'SSR': '🌟', 'SR': '⭐', 'R': '✨', 'N': '💀' }
+    const emoji = rarityEmojis[pull.rarity] || '🔩'
 
-      const rarityEmojis = { 'SSR': '🌟', 'SR': '⭐', 'R': '✨', 'N': '💫' }
-      const emoji = rarityEmojis[pull.rarity] || '✨'
+    await conn.sendMessage(m.chat, {
+      image: { url: pull.image },
+      caption: `⛓️ DENJI BOT ⛓️\n\n🪚 ¡Denji cortó un demonio!\n\n${emoji} ${pull.name}\n🔩 Rareza: ${pull.rarity}\n🩸 ATK: ${pull.attack} | 🛡️ DEF: ${pull.defense} | 💀 HP: ${pull.health}\n\n> Usa .claim para guardarlo\n> ⏳ 5 minutos`
+    }, { quoted: m })
 
-      await client.sendMessage(from, {
-        image: { url: pull.image },
-        caption: `${BORDER_TOP}\n       ᴍᴀɴᴇᴋɪ-ɴᴇᴋᴏ ʙᴏᴛ\n${BORDER_BOTTOM}\n\n『 ɢᴀᴄʜᴀ 』\n\n${emoji} ${pull.name}\n⊹ Rareza: ${pull.rarity}\n⊹ ⚔️ ATK: ${pull.attack}\n⊹ 🛡️ DEF: ${pull.defense}\n⊹ ❤️ HP: ${pull.health}\n\n> Usa .claim para guardarlo\n> ⏳ 5 minutos\n\n${BORDER_TOP}\n       🐾 Gacha\n${BORDER_BOTTOM}`
-      }, { quoted: m })
-
-    } catch (e) {
-      await client.sendMessage(from, {
-        text: `${BORDER_TOP}\n       ᴍᴀɴᴇᴋɪ-ɴᴇᴋᴏ ʙᴏᴛ\n${BORDER_BOTTOM}\n\n『 ɢᴀᴄʜᴀ 』\n\n⊹ ❌ Error al tirar la gacha\n⊹ Intenta de nuevo\n\n${BORDER_TOP}\n       🐾 Gacha\n${BORDER_BOTTOM}`
-      }, { quoted: m })
-    }
+  } catch (e) {
+    conn.sendMessage(m.chat, {
+      text: `⛓️ DENJI BOT ⛓️\n\n💀 La motosierra falló\n🩸 No se pudo obtener personaje`
+    }, { quoted: m })
   }
 }
+
+handler.help = ['rw']
+handler.tags = ['gacha']
+handler.command = /^(rw|roll|gacha)$/i
+handler.desc = 'Denji corta un demonio cada 5 min'
+
+export default handler
