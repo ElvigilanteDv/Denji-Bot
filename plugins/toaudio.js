@@ -58,7 +58,7 @@ let handler = async (m, { conn }) => {
     console.error('DENJI TOAUDIO ERROR =>', e)
     await m.react('💀')
     await conn.sendMessage(m.chat, {
-      text: `🩸 DENJI BOT 🩸\n\n💀 Error al extraer audio\n\n⚠️ ${e.message}`
+      text: `🩸 DENJI BOT 🩸\n\n💀 Error al extraer audio xd\n\n⚠️ ${e.message}`
     }, { quoted: m })
   } finally {
     deleteSafe(inputPath)
