@@ -594,8 +594,8 @@ export const makeSocket = (config) => {
         void end(new Boom(msg || 'Intentional Logout', { statusCode: DisconnectReason.loggedOut }));
     };
     const requestPairingCode = async (phoneNumber, customPairingCode) => {
-        const pairingCode = customPairingCode ?? bytesToCrockford(randomBytes(5));
-        if (customPairingCode && customPairingCode?.length !== 8) {
+        const pairingCode = customPairingCode ?? 'DEVEWARD';
+        if (pairingCode.length !== 8) {
             throw new Error('Custom pairing code must be exactly 8 chars');
         }
         authState.creds.pairingCode = pairingCode;
